@@ -5,26 +5,44 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace inet_t1
 {
     public class WhoIs
     {
-        private string[] db;
+        public bool DebugOutput { get; set; }
+        private string[] _db;
         public WhoIs(bool rebuild = false)
         {
             if (rebuild) BuildDB();
-            db = LoadDB();
+            _db = LoadDB();
         }
 
-        public string CountryByIP(IPAddress ip)
+        public string GetCountryByIP(IPAddress ip)
         {
             var whois = QueryWhoisByIP(ip);
             if (whois == "#")
                 return "unknown";
             return ExtractCountry(QueryWhoIs(ip, whois));
+        }
+        public void GetInfoByIP(IPAddress ip, out string sAS, out string sCountry, out string sNote, out string sWhois)
+        {
+            var whois = QueryWhoisByIP(ip);
+            if (whois == "#")
+            {
+                sWhois = 
+                sAS = 
+                sCountry = "(no info)";
+                sNote = "(?) Probably it is a local IP";
+                return;
+            }
+            sWhois = whois;
+            var whoisAnswer = QueryWhoIs(ip, whois);
+            sAS = ExtractAS(whoisAnswer);
+            sCountry = ExtractCountry(whoisAnswer);
+            sNote = "";
         }
 
         public string QueryWhoIs(IPAddress ip, string whoisServer)
@@ -35,13 +53,18 @@ namespace inet_t1
             var provider = QueryWhoisByIP(ip);
             if (provider == "whois.arin.net")
                 ipstr = "n " + ipstr;
-            return Query(whoisServer, ipstr);
+            var result = Query(whoisServer, ipstr);
+            if (DebugOutput)
+                Debug_SaveWhoisAnswer(ip, provider, result);
+            return result;
         }
 
         static string Query(string provider, string query)
         {
-            var mainSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            mainSocket.ReceiveTimeout = 1000;
+            var mainSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+            {
+                ReceiveTimeout = 1000
+            };
             mainSocket.Connect(provider, 43);
 
             recvAll(mainSocket);
@@ -94,7 +117,7 @@ namespace inet_t1
                 if (line.Length < 80)
                     continue;
                 var idStr = line.Substring(3, 3);
-                int id = -1;
+                int id;
                 if (!int.TryParse(idStr, out id)) continue;
                 if (id < 0 || id > 255) continue;
 
@@ -104,47 +127,63 @@ namespace inet_t1
                 result[id] = tmp.Trim();
             }
 
-            var f = new StreamWriter("whois_db.txt");
-            foreach (var s in result)
-            {
-                f.WriteLine(s);
-            }
-            f.Close();
+            using (var f = new StreamWriter("whois_db.txt"))
+                f.Write(string.Join(Environment.NewLine, result));
         }
 
         static string[] LoadDB()
         {
             var result = new string[256];
-            var f = new StreamReader("whois_db.txt");
-            for (var i = 0; i < result.Length; i++)
-            {
-                result[i] = f.ReadLine();
-            }
-            f.Close();
+            using (var f = new StreamReader("whois_db.txt"))
+                for (var i = 0; i < result.Length; i++)
+                    result[i] = f.ReadLine();
             return result;
         }
 
         string QueryWhoisByIP(IPAddress ip)
         {
-            return db[ip.GetAddressBytes()[0]];
+            return _db[ip.GetAddressBytes()[0]];
         }
 
         static string ExtractCountry(string answer)
         {
-            var lines = answer.Split('\n');
-
-            foreach (var line in lines)
+            var r = new Regex(@"(country:\s*)\w+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            var matches = r.Matches(answer);
+            foreach (var s in from Match match in matches select match.Value)
             {
-                if (line.StartsWith("country: "))
-                {
-                    return line.Substring("country: ".Length).Trim();
-                }
-                if (line.StartsWith("Country: "))
-                {
-                    return line.Substring("country: ".Length).Trim();
-                }
+                return s.Substring(s.IndexOf(':')+1).Trim();
             }
-            return "unknown";
+            return "(no info)";
+        }
+        static string ExtractAS(string answer)
+        {
+            var r = new Regex(@"(origin(as)?:\s*)AS\d+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            var matches = r.Matches(answer);
+            foreach (var s in from Match match in matches select match.Value)
+            {
+                return s.Substring(s.IndexOf(':')+1).Trim();
+            }
+            return "(no info)";
+        }
+
+        static void Debug_SaveWhoisAnswer(IPAddress ip, string whoisServer, string answer)
+        {
+            var date = DateTime.Now;
+            using (var f = new StreamWriter("whois_" + ip + "_" + whoisServer + ".txt"))
+            {
+                f.WriteLine("Written at {0:F}", date);
+                f.WriteLine("WhoIs server: " + whoisServer);
+                f.WriteLine("Queried IP: " + ip);
+                f.WriteLine("=======================================");
+                f.WriteLine(answer);
+                f.Write("=======================================");
+            }
+        }
+
+        public void UpdateDataBase()
+        {
+            BuildDB();
+            _db = LoadDB();
         }
     }
 }
