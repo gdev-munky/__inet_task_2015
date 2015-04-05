@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -20,29 +19,44 @@ namespace inet_t1
             _db = LoadDB();
         }
 
-        public string GetCountryByIP(IPAddress ip)
+        public static bool IsIpLocal(IPAddress ip)
         {
-            var whois = QueryWhoisByIP(ip);
-            if (whois == "#")
-                return "unknown";
-            return ExtractCountry(QueryWhoIs(ip, whois));
-        }
-        public void GetInfoByIP(IPAddress ip, out string sAS, out string sCountry, out string sNote, out string sWhois)
-        {
-            var whois = QueryWhoisByIP(ip);
-            if (whois == "#")
+            if (ip.AddressFamily != AddressFamily.InterNetwork)
+                throw new NotSupportedException("IPv6 and everything, except v4 is not yet supported");
+
+            var bytes = ip.GetAddressBytes();
+            switch (bytes[0])
             {
-                sWhois = 
-                sAS = 
-                sCountry = "(no info)";
-                sNote = "(?) Probably it is a local IP";
-                return;
+                case 10:
+                case 127:
+                    return true;
+                case 172:
+                    return bytes[1] > 15 && bytes[1] < 32;
+                case 192:
+                    return bytes[1] == 168;
             }
-            sWhois = whois;
-            var whoisAnswer = QueryWhoIs(ip, whois);
-            sAS = ExtractAS(whoisAnswer);
-            sCountry = ExtractCountry(whoisAnswer);
-            sNote = "";
+            return false;
+        }
+
+        public WhoIsResult GetInfoByIP(IPAddress ip)
+        {
+            var r = new WhoIsResult {IP = ip, ServerName = QueryWhoisByIP(ip)};
+            r.ProbablyLocal = IsIpLocal(ip) || r.ServerName == null;
+            if (r.ProbablyLocal)
+            {
+                r.ServerName =
+                r.AS =
+                r.NetName = 
+                r.CountryCode = "(no info)";
+                r.Note = "It is a local IP (or DB is corrupted)";
+                return r;
+            }
+            r.Response = QueryWhoIs(ip, r.ServerName);
+            r.AS = ExtractAS(r.Response);
+            r.CountryCode = ExtractCountry(r.Response);
+            r.NetName = ExtractNetName(r.Response);
+            r.Note = "";
+            return r;
         }
 
         public string QueryWhoIs(IPAddress ip, string whoisServer)
@@ -67,35 +81,30 @@ namespace inet_t1
             };
             mainSocket.Connect(provider, 43);
 
-            recvAll(mainSocket);
+            mainSocket.ReceiveAll();
 
-            Thread.Sleep(500);
-            mainSocket.Send(Encoding.UTF8.GetBytes(query));
+            var err = mainSocket.TrySend(Encoding.UTF8.GetBytes(query));
+            var attempts = 10;
+            while (err != SocketError.Success && attempts > 0)
+            {
+                --attempts;
+                Thread.Sleep(500);
+                err = mainSocket.TrySend(Encoding.UTF8.GetBytes(query));
+            }
+            if (err != SocketError.Success)
+            {
+                Console.WriteLine("[Failed to send query to {0}]", provider);
+                try { mainSocket.Disconnect(false); } catch { }
+                try { mainSocket.Close();} catch { }
+                return "";
+            }
             Thread.Sleep(500);
 
-            var data = recvAll(mainSocket);
+
+            var data = mainSocket.ReceiveAll();
+            mainSocket.Disconnect(false);
             mainSocket.Close();
             return Encoding.UTF8.GetString(data);
-        }
-
-        static byte[] recvAll(Socket socket)
-        {
-            var result = new List<byte>();
-            var sockList = new List<Socket> { socket };
-            var emptyList = new List<Socket>();
-            Socket.Select(sockList, emptyList, emptyList, 500);
-            while (sockList.Any())
-            {
-                var data = new byte[0xffff];
-                var recvd = socket.Receive(data);
-                if (recvd == 0)
-                    break;
-                for (var i = 0; i < recvd; ++i)
-                {
-                    result.Add(data[i]);
-                }
-            }
-            return result.ToArray();
         }
 
         static void BuildDB()
@@ -142,28 +151,31 @@ namespace inet_t1
 
         string QueryWhoisByIP(IPAddress ip)
         {
-            return _db[ip.GetAddressBytes()[0]];
+            var dbValue = _db[ip.GetAddressBytes()[0]];
+            return dbValue.StartsWith("whois.") ? dbValue : null;
+        }
+
+        static readonly Regex RegexCountryExtractor = new Regex(@"(country:\s*)\w+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        static readonly Regex RegexASExtractor = new Regex(@"((origin(as)?)|(aut-num)):\s*AS\d+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        static readonly Regex RegexNetNameExtractor = new Regex(@"(netname|tech-c):\s*\w+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        static string ExtractWhoIsProperty(Regex r, string answer)
+        {
+            return (from Match match in r.Matches(answer) select match.Value)
+                .Select(s => s.Substring(s.IndexOf(':') + 1).Trim())
+                .FirstOrDefault();
         }
 
         static string ExtractCountry(string answer)
         {
-            var r = new Regex(@"(country:\s*)\w+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-            var matches = r.Matches(answer);
-            foreach (var s in from Match match in matches select match.Value)
-            {
-                return s.Substring(s.IndexOf(':')+1).Trim();
-            }
-            return "(no info)";
+            return ExtractWhoIsProperty(RegexCountryExtractor, answer) ?? "(no info)";
         }
         static string ExtractAS(string answer)
         {
-            var r = new Regex(@"(origin(as)?:\s*)AS\d+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-            var matches = r.Matches(answer);
-            foreach (var s in from Match match in matches select match.Value)
-            {
-                return s.Substring(s.IndexOf(':')+1).Trim();
-            }
-            return "(no info)";
+            return ExtractWhoIsProperty(RegexASExtractor, answer) ?? "(no info)";
+        }
+        static string ExtractNetName(string answer)
+        {
+            return ExtractWhoIsProperty(RegexNetNameExtractor, answer) ?? "(no info)";
         }
 
         static void Debug_SaveWhoisAnswer(IPAddress ip, string whoisServer, string answer)

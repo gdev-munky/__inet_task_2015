@@ -25,35 +25,26 @@ namespace inet_t1
             for (int id = 0; id < args.Length; id++)
             {
                 var s = args[id];
-                if (s == "-debug")
+                switch (s)
                 {
-                    whois.DebugOutput = !whois.DebugOutput;
-                    continue;
-                }
-                if (s == "-outputserver")
-                {
-                    outputWhoisServer = !outputWhoisServer;
-                    continue;
-                }
-                if (s == "-upd")
-                {
-                    whois.UpdateDataBase();
-                    continue;
-                }
-                if (s == "-ttl")
-                {
-                    try { ttl = int.Parse(args[id + 1]); }
-                    catch {Console.WriteLine("Failed to set TTL (arg id = {0}).", id);} 
-                    continue;
+                    case "/debug":
+                        whois.DebugOutput = !whois.DebugOutput;
+                        continue;
+                    case "/outputserver":
+                        outputWhoisServer = !outputWhoisServer;
+                        continue;
+                    case "/upd":
+                        whois.UpdateDataBase();
+                        continue;
+                    case "/ttl":
+                        try { ttl = int.Parse(args[id + 1]); }
+                        catch { Console.WriteLine("Failed to set TTL (arg id = {0}).", id); }
+                        continue;
                 }
                 try
-                {
-                    TraceRt(s, ttl, outputWhoisServer);
-                }
+                { TraceRt(s, ttl, outputWhoisServer); }
                 catch (Exception e)
-                {
-                    Console.WriteLine(e);
-                }
+                { Console.WriteLine(e); }
             }
             Console.WriteLine("Done!");
         }
@@ -75,8 +66,10 @@ namespace inet_t1
                     Console.WriteLine("Failed to resolve hostname '{0}'.", host);
                     return;
                 }
+                Console.WriteLine(" (ip: {0})", ip);
             }
-            Console.WriteLine(" (ip: {0})", ip);
+            else Console.WriteLine();
+            
             for (var step = 0; step < maxttl; ++step)
             {
                 using (var pinger = new Ping())
@@ -94,26 +87,23 @@ namespace inet_t1
                         Console.WriteLine("[{0,2}] : error={1}", step, reply.Status);
                         continue;
                     }
-                    Console.Write("[{0,2}] : ip={1,15}; latency={2} ms; ", step, reply.Address, Math.Round(dtime));
+                    Console.WriteLine("[{0,2}] : ip={1,15}, latency={2} ms", step, reply.Address, Math.Round(dtime));
 
-                    string sAS, sNote, sCountry, sServer;
-                    whois.GetInfoByIP(reply.Address, out sAS, out sCountry, out sNote, out sServer);
-                    if (sServer.StartsWith("("))
-                        Console.Write("whois: {0}", sServer);
-                    
+                    var info = whois.GetInfoByIP(reply.Address);
+                    if (info.ProbablyLocal)
+                        Console.WriteLine("    whois:     " + info.ServerName);
                     else
                     {
                         if (outputWhoisServer)
-                            Console.Write("whois: {2}; country: {0}; AS: {1}", sCountry, sAS, sServer);
-                        else
-                            Console.Write("country: {0}; AS: {1}", sCountry, sAS);
+                            Console.WriteLine("    whois:     " + info.ServerName);
+                        Console.WriteLine("    country:   " + info.CountryCode);
+                        Console.WriteLine("    as-number: " + info.AS);
+                        Console.WriteLine("    netname:   " + info.NetName);
                     }
                     
 
-                    if (!string.IsNullOrEmpty(sNote))
-                        Console.WriteLine("; note: " + sNote);
-                    else 
-                        Console.WriteLine();
+                    if (!string.IsNullOrEmpty(info.Note))
+                        Console.WriteLine("    note:      " + info.Note);
 
                     if (Equals(ip, reply.Address))
                         return;
