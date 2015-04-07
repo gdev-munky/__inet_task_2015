@@ -1,16 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
-using System.Threading;
 
-namespace inet_t3
+namespace portscan
 {
     class Program
     {
-        private static int _portStart = 0x0000;
-        private static int _portEnd = 0xffff;
-        private static IPAddress _ip = IPAddress.Loopback;
+        internal static int MaxThreads;
+        private static List<PortSpan> portSpans = new List<PortSpan>();
+        internal static IPAddress _ip = IPAddress.Loopback;
+        internal static int ThreadCount = 36;
         static void Main(string[] args)
         {
             for (var i = 0; i < args.Length; i++)
@@ -19,59 +20,35 @@ namespace inet_t3
                 var ns = (args.Length > i+1) ? args[i + 1] : null;
                 ParseArg(s, ns);
             }
-            Console.Title = "Preparing ...";
-            Console.WriteLine("Forming tasks ...");
-            var portChecker = new PortChecker(_ip);
-            var tasks = new List<ScanTask>();
-            for (var port = _portStart; port <= _portEnd; ++port)
+            Console.Title = "Scanning ...";
+            Console.WriteLine("Scanning {0}...", _ip);
+
+            IEnumerable<int> tcpOpened;
+            IEnumerable<int> udpOpened;
+            var stopWatch = new Stopwatch();
+
+            stopWatch.Start();
             {
-                var t = new ScanTask
+                var scanner = new PortScanner(_ip, ThreadCount);
+                scanner.ReportProgress += ReportProgress;
+                foreach (var span in portSpans)
                 {
-                    MyPort = port,
-                    Checker = portChecker,
-                    ResetEvent = new ManualResetEvent(false),
-                    UseUDP = false
-                };
-                ThreadPool.QueueUserWorkItem(a => ((ScanTask)a).Run(), t); 
-                tasks.Add(t);
-
-                t = new ScanTask
-                {
-                    MyPort = port,
-                    Checker = portChecker,
-                    ResetEvent = new ManualResetEvent(false),
-                    UseUDP = true
-                };
-                ThreadPool.QueueUserWorkItem(a => ((ScanTask)a).Run(), t); 
-                tasks.Add(t);
+                    scanner.PushTaskGroup(span.FirstPort, span.LastPort, span.Udp);
+                }
+                scanner.Scan(out tcpOpened, out udpOpened);
             }
-            Console.WriteLine("Scanning ...");
-            var resetEvents = tasks.Select(task => (WaitHandle) task.ResetEvent).ToList();
-            var offset = 0;
-            while (resetEvents.Count > offset)
-            {
-                Console.Title = string.Format("Waiting threads {0}/{1} - {2:P}", 
-                    offset, resetEvents.Count,
-                    (float)offset / resetEvents.Count);
-                WaitHandle.WaitAll(resetEvents.Where((handle, i) => i >= offset && i < offset+64).ToArray());
-                offset += 64;
-            }
+            stopWatch.Stop();
 
-            var tcpOpened = new List<int>();
-            var udpOpened = new List<int>();
-            foreach (var scanTask in tasks.Where(scanTask => scanTask.Result))
-            {
-                if (scanTask.UseUDP)
-                    udpOpened.Add(scanTask.MyPort);
-                else
-                    tcpOpened.Add(scanTask.MyPort);
-            }
-
-            Console.Title = "Complete";
-            Console.WriteLine("Opened TCP ports in range [{0}..{1}]:", _portStart, _portEnd);
-            Console.WriteLine(string.Join(", ", tcpOpened));
-            Console.WriteLine("Opened UDP ports in range [{0}..{1}]:", _portStart, _portEnd);
-            Console.WriteLine(string.Join(", ", udpOpened));
+            Console.Title = "";
+            var listTcp = tcpOpened.ToList();
+            var listUdp = udpOpened.ToList();
+            listTcp.Sort();
+            listUdp.Sort();
+            Console.WriteLine("Completed in {0} ms", stopWatch.ElapsedMilliseconds);
+            Console.WriteLine("Opened TCP ports ({0}):", listTcp.Count());
+            Console.WriteLine(string.Join(", ", listTcp));
+            Console.WriteLine("Opened UDP ports ({0}):", listUdp.Count());
+            Console.WriteLine(string.Join(", ", listUdp));
         }
 
         static void ParseArg(string arg, string nextArg)
@@ -79,25 +56,33 @@ namespace inet_t3
             ushort temp;
             switch (arg)
             {
-                case "/s":
+                case "/tcp":
+                case "/udp":
                     if (string.IsNullOrWhiteSpace(nextArg))
                         return;
-                    if (!ushort.TryParse(nextArg, out temp))
-                        Console.WriteLine("Argument error: specified start port is not valid");
-                    _portStart = temp;
-                    return;
-                case "/e":
-                    if (string.IsNullOrWhiteSpace(nextArg))
-                        return;
-                    if (!ushort.TryParse(nextArg, out temp))
-                        Console.WriteLine("Argument error: specified end port is not valid");
-                    _portEnd = temp;
+                    try
+                    {
+                        var bounds = nextArg.Split(new[] {".."}, StringSplitOptions.None);
+                        var s = int.Parse(bounds[0]);
+                        var e = int.Parse(bounds[1]);
+                        portSpans.Add(new PortSpan(s, e, arg == "/udp"));
+                    }
+                    catch (Exception)
+                    {
+                        Console.WriteLine("Argument error: failed to parse tcp port span. Format: {0} FIRST..LAST", arg);
+                    }
                     return;
                 case "/ip":
                     if (string.IsNullOrWhiteSpace(nextArg))
                         return;
                     if (!IPAddress.TryParse(nextArg, out _ip)) 
                         Console.WriteLine("Argument error: specified ip is not valid");
+                    return;
+                case "/threads":
+                    if (string.IsNullOrWhiteSpace(nextArg))
+                        return;
+                    if (!int.TryParse(nextArg, out ThreadCount))
+                        Console.WriteLine("Argument error: specified thread count is not valid");
                     return;
                 case "/hostname":
                     if (string.IsNullOrWhiteSpace(nextArg))
@@ -114,20 +99,24 @@ namespace inet_t3
                     return;
             }
         }
+
+        static void ReportProgress(int a, int b)
+        {
+            Console.Title = string.Format("Progress : {0}/{1} - {2:P}", a, b, (float) a/b);
+        }
     }
 
-    class ScanTask
+    class PortSpan
     {
-        public int MyPort { get; set; }
-        public PortChecker Checker { get; set; }
-        public ManualResetEvent ResetEvent { get; set; }
-        public bool UseUDP { get; set; }
-        public bool Result { get; set; }
+        public int FirstPort { get; set; }
+        public int LastPort { get; set; }
+        public bool Udp { get; set; }
 
-        public void Run()
+        public PortSpan(int f, int l, bool udp)
         {
-            Result = UseUDP ? Checker.IsUdpOpened(MyPort) : Checker.IsTcpOpened(MyPort);
-            ResetEvent.Set();
+            FirstPort = f;
+            LastPort = l;
+            Udp = udp;
         }
     }
 }

@@ -1,14 +1,14 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 
-namespace inet_t3
+namespace portscan
 {
     public class PortChecker
     {
-        public PortChecker(IPAddress ip, int timeout = 400)
+        public PortChecker(IPAddress ip, int timeout = 150)
         {
             IP = ip;
             TimeOut = timeout;
@@ -19,20 +19,20 @@ namespace inet_t3
         {
             if (IP == null)
                 throw new NullReferenceException("IP is set to null, cannot do anything");
-            
+
+            var stopWatch = new Stopwatch();
+            stopWatch.Start();
             var endPoint = new IPEndPoint(IP, port);
             var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            var result = sock.BeginConnect(endPoint, (ar =>
-                {
-                    try
-                    {
-                        var client = (Socket)ar.AsyncState;
-                        client.EndConnect(ar);
-                    }
-                    catch { }
-                }), sock);
-            var success = result.AsyncWaitHandle.WaitOne(TimeOut, false);
+            var success = false;
+            try
+            {
+                sock.Connect(endPoint, TimeOut);
+                success = true;
+            }
+            catch {}
             sock.Close();
+            stopWatch.Stop();
             return success;
         }
 

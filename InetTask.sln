@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2013
 VisualStudioVersion = 12.0.31101.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "inet_t1", "inet_t1\inet_t1.csproj", "{71C198CE-E606-4A2E-AFE8-15BF12BB10B2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "tracert", "inet_t1\tracert.csproj", "{71C198CE-E606-4A2E-AFE8-15BF12BB10B2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "inet_t3", "inet_t3\inet_t3.csproj", "{4E82B116-A819-49C4-BB5C-BD9A933E8992}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "portscan", "inet_t3\portscan.csproj", "{4E82B116-A819-49C4-BB5C-BD9A933E8992}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
