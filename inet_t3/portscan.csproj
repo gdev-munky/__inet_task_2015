@@ -41,7 +41,10 @@
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="PortChecker.cs" />
+    <Compile Include="ProtocolTester.cs" />
+    <Compile Include="ScannerThread.cs" />
     <Compile Include="SocketExtensions.cs" />
+    <Compile Include="Testers.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

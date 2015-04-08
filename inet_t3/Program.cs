@@ -9,9 +9,9 @@ namespace portscan
     class Program
     {
         internal static int MaxThreads;
-        private static List<PortSpan> portSpans = new List<PortSpan>();
-        internal static IPAddress _ip = IPAddress.Loopback;
-        internal static int ThreadCount = 36;
+        private static readonly List<PortSpan> PortSpans = new List<PortSpan>();
+        internal static IPAddress IP = IPAddress.Loopback;
+        internal static int ThreadCount = 1024;
         static void Main(string[] args)
         {
             for (var i = 0; i < args.Length; i++)
@@ -21,17 +21,22 @@ namespace portscan
                 ParseArg(s, ns);
             }
             Console.Title = "Scanning ...";
-            Console.WriteLine("Scanning {0}...", _ip);
+            Console.WriteLine("Scanning {0}...", IP);
 
-            IEnumerable<int> tcpOpened;
-            IEnumerable<int> udpOpened;
+            IEnumerable<ProtocolPort> tcpOpened;
+            IEnumerable<ProtocolPort> udpOpened;
             var stopWatch = new Stopwatch();
 
             stopWatch.Start();
             {
-                var scanner = new PortScanner(_ip, ThreadCount);
+                var scanner = new PortScanner(IP, ThreadCount);
+                scanner.ProtocolTesters.Add(Testers.CreateDNSTester());
+                scanner.ProtocolTesters.Add(Testers.CreateNTPTester());
+                scanner.ProtocolTesters.Add(Testers.CreateSMTPTester());
+                scanner.ProtocolTesters.Add(Testers.CreatePOP3Tester());
+                scanner.ProtocolTesters.Add(Testers.CreateHTTPTester());
                 scanner.ReportProgress += ReportProgress;
-                foreach (var span in portSpans)
+                foreach (var span in PortSpans)
                 {
                     scanner.PushTaskGroup(span.FirstPort, span.LastPort, span.Udp);
                 }
@@ -53,9 +58,14 @@ namespace portscan
 
         static void ParseArg(string arg, string nextArg)
         {
-            ushort temp;
             switch (arg)
             {
+                case "/?":
+                case "/help":
+                case "help":
+                case "?":
+                    PrintHelp();
+                    return;
                 case "/tcp":
                 case "/udp":
                     if (string.IsNullOrWhiteSpace(nextArg))
@@ -65,7 +75,7 @@ namespace portscan
                         var bounds = nextArg.Split(new[] {".."}, StringSplitOptions.None);
                         var s = int.Parse(bounds[0]);
                         var e = int.Parse(bounds[1]);
-                        portSpans.Add(new PortSpan(s, e, arg == "/udp"));
+                        PortSpans.Add(new PortSpan(s, e, arg == "/udp"));
                     }
                     catch (Exception)
                     {
@@ -75,7 +85,7 @@ namespace portscan
                 case "/ip":
                     if (string.IsNullOrWhiteSpace(nextArg))
                         return;
-                    if (!IPAddress.TryParse(nextArg, out _ip)) 
+                    if (!IPAddress.TryParse(nextArg, out IP)) 
                         Console.WriteLine("Argument error: specified ip is not valid");
                     return;
                 case "/threads":
@@ -90,7 +100,7 @@ namespace portscan
                     try
                     {
                         var p = Dns.GetHostEntry(nextArg);
-                        _ip = p.AddressList.First();
+                        IP = p.AddressList.First();
                     }
                     catch (Exception)
                     {
@@ -98,6 +108,20 @@ namespace portscan
                     }
                     return;
             }
+        }
+
+        static void PrintHelp()
+        {
+            Console.WriteLine("portscan help: =================");
+            Console.WriteLine(" /ip IP - sets IP to scan (def: 127.0.0.1)");
+            Console.WriteLine(" /hostname H - sets host to scan");
+            Console.WriteLine(" /tcp A..B - adds a TCP port span [A, B]");
+            Console.WriteLine(" /udp A..B - adds a UDP port span [A, B]");
+            Console.WriteLine(" /threads N - sets thread count to N (def: 1024)");
+            Console.WriteLine("================================");
+            Console.WriteLine(" You may specify either ip or hostname. Also, multiple port spans are allowed");
+            Console.WriteLine(" You should not specify more then 1k threads for big port spans");
+            Console.WriteLine("================================");
         }
 
         static void ReportProgress(int a, int b)
