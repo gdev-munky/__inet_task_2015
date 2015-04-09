@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "tracert", "inet_t1\tracert.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "portscan", "inet_t3\portscan.csproj", "{4E82B116-A819-49C4-BB5C-BD9A933E8992}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "sntp", "sntp\sntp.csproj", "{C17D8BA1-5494-4174-BD5D-2CA612CC2767}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{4E82B116-A819-49C4-BB5C-BD9A933E8992}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4E82B116-A819-49C4-BB5C-BD9A933E8992}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4E82B116-A819-49C4-BB5C-BD9A933E8992}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C17D8BA1-5494-4174-BD5D-2CA612CC2767}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C17D8BA1-5494-4174-BD5D-2CA612CC2767}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C17D8BA1-5494-4174-BD5D-2CA612CC2767}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C17D8BA1-5494-4174-BD5D-2CA612CC2767}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
