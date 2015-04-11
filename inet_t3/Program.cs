@@ -35,7 +35,7 @@ namespace portscan
                 {
                     Testers.CreateHTTPTester(),
                     Testers.CreateNTPTester(),
-                    Testers.CreateDNSTester(),
+                    Testers.CreateDnsTester(),
                     Testers.CreateSMTPTester(),
                     Testers.CreatePOP3Tester()
                 });
@@ -53,6 +53,14 @@ namespace portscan
             var listUdp = udpOpened.ToList();
             listTcp.Sort();
             listUdp.Sort();
+
+            var dnsUdpPort = listUdp.FirstOrDefault(port => port.Name == "DNS");
+            if (dnsUdpPort != null)
+            {
+                var dnsTcpPort = listTcp.FirstOrDefault(p => p.Port == dnsUdpPort.Port);
+                if (dnsTcpPort != null)
+                    dnsTcpPort.Name = dnsUdpPort.Name;
+            }
             Console.WriteLine("Completed in {0} ms", stopWatch.ElapsedMilliseconds);
             Console.WriteLine("Opened TCP ports ({0}):", listTcp.Count());
             Console.WriteLine(string.Join(", ", listTcp));
