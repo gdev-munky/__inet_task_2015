@@ -14,7 +14,7 @@ namespace portscan
         public int ThreadCount { get; private set; }
         public IPAddress ScanTarget { get; private set; }
         public int TaskCount { get; private set; }
-        public List<ProtocolTester> ProtocolTesters { get; set; }
+        public List<ProtocolTester> ProtocolTesters { get; private set; }
 
         private readonly ScannerThread[] _threads;
 
@@ -24,7 +24,7 @@ namespace portscan
             ScanTarget = epoint;
             _threads = new ScannerThread[ThreadCount];
             ProtocolTesters = new List<ProtocolTester>();
-            var checker = new PortChecker(epoint, ProtocolTesters);
+            var checker = new PortChecker(epoint, ProtocolTesters, 400);
             for (var i = 0; i < ThreadCount; ++i)
                 _threads[i] = new ScannerThread(checker);
         }

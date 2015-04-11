@@ -18,7 +18,8 @@ namespace portscan
             {
                 var s = args[i];
                 var ns = (args.Length > i+1) ? args[i + 1] : null;
-                ParseArg(s, ns);
+                if (!ParseArg(s, ns))
+                    return;
             }
             Console.Title = "Scanning ...";
             Console.WriteLine("Scanning {0}...", IP);
@@ -30,11 +31,14 @@ namespace portscan
             stopWatch.Start();
             {
                 var scanner = new PortScanner(IP, ThreadCount);
-                scanner.ProtocolTesters.Add(Testers.CreateDNSTester());
-                scanner.ProtocolTesters.Add(Testers.CreateNTPTester());
-                scanner.ProtocolTesters.Add(Testers.CreateSMTPTester());
-                scanner.ProtocolTesters.Add(Testers.CreatePOP3Tester());
-                scanner.ProtocolTesters.Add(Testers.CreateHTTPTester());
+                scanner.ProtocolTesters.AddRange(new[]
+                {
+                    Testers.CreateHTTPTester(),
+                    Testers.CreateNTPTester(),
+                    Testers.CreateDNSTester(),
+                    Testers.CreateSMTPTester(),
+                    Testers.CreatePOP3Tester()
+                });
                 scanner.ReportProgress += ReportProgress;
                 foreach (var span in PortSpans)
                 {
@@ -56,20 +60,20 @@ namespace portscan
             Console.WriteLine(string.Join(", ", listUdp));
         }
 
-        static void ParseArg(string arg, string nextArg)
+        static bool ParseArg(string arg, string nextArg)
         {
             switch (arg)
             {
                 case "/?":
                 case "/help":
-                case "help":
-                case "?":
+                //case "help":
+                //case "?":
                     PrintHelp();
-                    return;
+                    return false;
                 case "/tcp":
                 case "/udp":
                     if (string.IsNullOrWhiteSpace(nextArg))
-                        return;
+                        return true;
                     try
                     {
                         var bounds = nextArg.Split(new[] {".."}, StringSplitOptions.None);
@@ -81,22 +85,22 @@ namespace portscan
                     {
                         Console.WriteLine("Argument error: failed to parse tcp port span. Format: {0} FIRST..LAST", arg);
                     }
-                    return;
+                    return true;
                 case "/ip":
                     if (string.IsNullOrWhiteSpace(nextArg))
-                        return;
+                        return false;
                     if (!IPAddress.TryParse(nextArg, out IP)) 
                         Console.WriteLine("Argument error: specified ip is not valid");
-                    return;
+                    return true;
                 case "/threads":
                     if (string.IsNullOrWhiteSpace(nextArg))
-                        return;
+                        return false;
                     if (!int.TryParse(nextArg, out ThreadCount))
                         Console.WriteLine("Argument error: specified thread count is not valid");
-                    return;
+                    return true;
                 case "/hostname":
                     if (string.IsNullOrWhiteSpace(nextArg))
-                        return;
+                        return false;
                     try
                     {
                         var p = Dns.GetHostEntry(nextArg);
@@ -105,9 +109,11 @@ namespace portscan
                     catch (Exception)
                     {
                         Console.WriteLine("Argument error: specified hostname is not valid");
+                        return false;
                     }
-                    return;
+                    return true;
             }
+            return true;
         }
 
         static void PrintHelp()

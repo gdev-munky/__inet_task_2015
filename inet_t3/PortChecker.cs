@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 
 namespace portscan
 {
@@ -24,34 +25,42 @@ namespace portscan
             if (IP == null)
                 throw new NullReferenceException("IP is set to null, cannot do anything");
 
-            var stopWatch = new Stopwatch();
-            stopWatch.Start();
             var endPoint = new IPEndPoint(IP, port);
-            var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             var success = false;
-            try
+            foreach (var tester in ProtocolTesters.Where(t => t.Tcp))
             {
-                sock.ReceiveTimeout = TimeOut;
-                sock.Connect(endPoint, TimeOut);
-                var bts = new byte[4096];
-                var recvd = 0;
-                protocol = "?";
+                var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 try
                 {
-                    recvd = sock.Receive(bts);
+                    sock.ReceiveTimeout = sock.SendTimeout = TimeOut;
+                    sock.Connect(endPoint, TimeOut);
+                    success = true;
+
+                    var bts = new byte[4096];
+                    var recvd = 0;
+                    protocol = "?";
+                    try
+                    {
+                        recvd = sock.Receive(bts);
+                    }
+                    catch
+                    {
+                    }
+                    if (tester.TestTCP(sock, bts, recvd, TimeOut))
+                    {
+                        protocol = tester.Name;
+                        sock.Close();
+                        return true;
+                    }
                 }
                 catch
-                {}
-                success = true;
-                foreach (var t in ProtocolTesters.Where(t => t.TestTCP(sock, bts, recvd, TimeOut)))
                 {
-                    protocol = t.Name;
-                    break;
                 }
+                sock.Close();
+                if (!success)
+                    break;
             }
-            catch {}
-            sock.Close();
-            stopWatch.Stop();
+
             return success;
         }
 
