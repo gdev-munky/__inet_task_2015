@@ -1,10 +1,30 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Text;
 
 namespace DnsCache.DnsPacket
 {
-    public class RequestRecord : IMySerializable
+    public class RequestRecord : IMySerializable, IEquatable<RequestRecord>
     {
+        public override bool Equals(object obj)
+        {
+            if (ReferenceEquals(null, obj)) return false;
+            if (ReferenceEquals(this, obj)) return true;
+            if (obj.GetType() != this.GetType()) return false;
+            return Equals((RequestRecord) obj);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hashCode = (_key != null ? _key.GetHashCode() : 0);
+                hashCode = (hashCode*397) ^ (int) Type;
+                hashCode = (hashCode*397) ^ (int) Class;
+                return hashCode;
+            }
+        }
+
         private string _key = ".";
         public string Key
         {
@@ -41,6 +61,8 @@ namespace DnsCache.DnsPacket
                 {
                     var addr = originalOffset + bytes[offset] + (len & ~0xc0)*256;
                     ++offset;
+                    if (addr > offset)
+                        throw new Exception("?");
                     var result = ReadDnsStringFromBytes(bytes, ref addr, originalOffset);
                     return string.IsNullOrWhiteSpace(str) ? result : str + "." + result;
                 }
@@ -75,11 +97,23 @@ namespace DnsCache.DnsPacket
 
         public bool Equals(RequestRecord other)
         {
-            if (other.Type != Type)
+            if (ReferenceEquals(null, other)) return false;
+            if (ReferenceEquals(this, other)) return true;
+            return string.Equals(_key, other._key) && Type == other.Type && Class == other.Class;
+        }
+
+        public static bool operator ==(RequestRecord a, RequestRecord b)
+        {
+            if ((object) a == null)
+                return (object) b == null;
+            if ((object) b == null)
                 return false;
-            if (other.Class != Class)
-                return false;
-            return other._key == _key;
+            return a.Equals(b);
+        }
+
+        public static bool operator !=(RequestRecord a, RequestRecord b)
+        {
+            return !(a == b);
         }
     }
 }

@@ -162,6 +162,11 @@ namespace DnsCache
             var newRequest = DomainTreeNode.FormRequest(false, unknown.ToArray());
             lock (Tasks)
             {
+                foreach (var t in Tasks)
+                {
+                    if (!t.Packet.Queries.Except(newRequest.Queries).Any())
+                        return;
+                }
                 Tasks.Add(new PrecacheTask(p.Id, newRequest.Id, answer) { Client = sender });
             }
             UdpSocket.SendTo(newRequest.GetBytes(), ParentServer);
