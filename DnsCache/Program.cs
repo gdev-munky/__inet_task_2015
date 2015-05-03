@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -49,23 +50,25 @@ namespace DnsCache
             t.Abort();
             t.Join();
 
+            var f = new StreamWriter("log.txt");
             foreach (var domain in dns.DomainRoot.SubDomains)
             {
-                printDomain(domain);
+                printDomain(domain, f);
             }
+            f.Close();
         }
 
-        static void printDomain(DomainTreeNode domain, string offset = "")
+        static void printDomain(DomainTreeNode domain, StreamWriter f, string offset = "")
         {
-            Console.WriteLine(offset + "#DOMAIN: " + domain.AccumulateLabels());
-            offset += " ";
+            f.WriteLine(offset + "#DOMAIN: " + domain.AccumulateLabels());
+            offset += "\t";
             foreach (var r in domain.Cache)
             {
-                Console.WriteLine(offset + r);
+                f.WriteLine(offset + r);
             }
             foreach (var d in domain.SubDomains)
             {
-                printDomain(d, offset);
+                printDomain(d,f, offset);
             }
         }
 
