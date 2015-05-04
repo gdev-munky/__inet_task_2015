@@ -74,6 +74,11 @@ namespace DnsCache.DnsPacket
             return str;
         }
 
+        internal static string ReadDnsStringFromBytes(byte[] bytes, ref int offset)
+        {
+            return ReadDnsStringFromBytes(bytes, ref offset, 0) + ".";
+        }
+
         internal static void WriteDnsString(List<byte> bts, string key)
         {
             var startp = 0;

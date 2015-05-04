@@ -52,6 +52,8 @@ namespace DnsCache
                 try
                 {
                     len = UdpSocket.ReceiveFrom(buffer, ref sender);
+                    if (len < 12)
+                        continue;
                 }
                 catch
                 {
@@ -61,7 +63,17 @@ namespace DnsCache
                 }
                 var p = new Packet();
                 var offset = 0;
-                p.FromBytes(buffer, ref offset);
+                try
+                {
+                    p.FromBytes(buffer, ref offset);
+                }
+                catch (Exception e)
+                {
+                    continue;
+#if DEBUG
+                    throw;
+#endif
+                }
                 if (offset > len)
                     Console.WriteLine(sender + ": sent unknown shit");
                 if (p.Flags.IsQuery())
@@ -115,19 +127,36 @@ namespace DnsCache
                 foreach (var rec in p.Answers)
                 {
                     DomainRoot.AddNewData(rec.Key, rec);
-                    Console.WriteLine("+ " + rec);
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("[+]: Answer for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec, rec.TTL, task.ClientId);
+                    Console.ForegroundColor = ConsoleColor.White;
+                }
+                foreach (var rec in p.AuthorityRecords)
+                {
+                    DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.Authority);
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine("[+]: Authority for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec, rec.TTL, task.ClientId);
+                    Console.ForegroundColor = ConsoleColor.White;
+                }
+                foreach (var rec in p.AdditionalRecords)
+                {
+                    DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.AdditionalInfo);
+                    Console.ForegroundColor = ConsoleColor.DarkGreen;
+                    Console.WriteLine("[+]: Additional info for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec, rec.TTL, task.ClientId);
+                    Console.ForegroundColor = ConsoleColor.White;
                 }
             }
             task.AppendNewData(p.Answers);
+            task.AppendNewData(p.AuthorityRecords, DnsResourceRecordType.Authority);
+            task.AppendNewData(p.AdditionalRecords, DnsResourceRecordType.AdditionalInfo);
             if (task.Packet.Answers.Count < 1)
             {
                 task.Packet.Flags |= DnsPacketFlags.NameError;
                 if (!p.Flags.IsSuccessfull())
                     task.Packet.Flags = p.Flags;
             }
-            
+            Console.WriteLine("[ ]: Answering client [{0} #{1:X4}] (was delayed)", task.Client, task.ClientId);
             UdpSocket.SendTo(task.Packet.GetBytes(), task.Client);
-            Console.WriteLine(task.Client + ": precaching complete from " + sender);
         }
 
         internal void HandleQuery(IPEndPoint sender, Packet p)
@@ -143,7 +172,9 @@ namespace DnsCache
             if (inv)
             {
                 answer.Flags |= DnsPacketFlags.Inverse;
+                Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine(sender + ": sent inversed request");
+                Console.ForegroundColor = ConsoleColor.White;
                 var rp = new Packet
                 {
                     Id = p.Id
@@ -157,10 +188,12 @@ namespace DnsCache
             {
                 if (q.Class != DnsQueryClass.IN)
                 {
+                    Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine(sender + ": requests some non-internet things (" + q.Key + ")");
+                    Console.ForegroundColor = ConsoleColor.White;
                     continue;
                 }
-                Console.WriteLine(sender + ": wants - " + q);
+                Console.WriteLine("[?]: Request [{0} #{1:X4}]: {2}", sender, p.Id, q);
                 DomainTreeNode node;
                 lock (DomainRoot)
                     node = DomainRoot.Resolve(q.Key);
@@ -178,10 +211,11 @@ namespace DnsCache
                 p.Answers.AddRange(
                     resources.Select(
                         record =>
-                            record.GetResourceRecord(q.Key, (int) (record.ExpirationTime - DateTime.Now).TotalSeconds)));
+                            record.GetResourceRecord(record.SecondsLeft)));
             }
             if (unknown.Count < 1)
             {
+                Console.WriteLine("[ ]: Answering client [{0} #{1:X4}] (immediately)", sender, p.Id);
                 UdpSocket.SendTo(p.GetBytes(), sender);
                 return;
             }

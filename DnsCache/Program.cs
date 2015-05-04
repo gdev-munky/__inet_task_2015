@@ -57,6 +57,7 @@ namespace DnsCache
 
             var t = new Thread(() => dns.Listen());
             t.Start();
+            Console.Title = "DNS Cache Server at port " + port;
             Console.WriteLine("Listening... (write 'exit' to exit)");
             var s = (Console.ReadLine()??"").ToLowerInvariant();
             while (s != "exit")
@@ -66,6 +67,7 @@ namespace DnsCache
             dns.ShouldRun = false;
             t.Abort();
             t.Join();
+            Console.Title = "DNS Cache Server, closing ...";
 
             var f = new StreamWriter("log.txt");
             foreach (var domain in dns.DomainRoot.SubDomains)
@@ -79,9 +81,17 @@ namespace DnsCache
         {
             f.WriteLine(offset + "#DOMAIN: " + domain.AccumulateLabels());
             offset += "\t";
+            foreach (var r in domain.Authority)
+            {
+                f.WriteLine(offset + "[auth]: " + r);
+            }
             foreach (var r in domain.Cache)
             {
-                f.WriteLine(offset + r);
+                f.WriteLine(offset + "[cache]: " + r);
+            }
+            foreach (var r in domain.AdditionalInfo)
+            {
+                f.WriteLine(offset + "[info]: " + r);
             }
             foreach (var d in domain.SubDomains)
             {
@@ -91,7 +101,7 @@ namespace DnsCache
 
         static void ReportUsage()
         {
-            Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip> <[port]>");
+            Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip> <[listen_port]>");
         }
 
     }

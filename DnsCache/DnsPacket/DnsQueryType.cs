@@ -83,6 +83,11 @@
         TXT = 16,
 
         /// <summary>
+        /// IPv6 address
+        /// </summary>
+        AAAA = 28,
+
+        /// <summary>
         /// Request for a transfer of an entire zone
         /// </summary>
         AXFR = 252,

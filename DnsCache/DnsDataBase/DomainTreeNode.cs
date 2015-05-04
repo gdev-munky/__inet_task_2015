@@ -13,12 +13,16 @@ namespace DnsCache.DnsDataBase
             Parent = parent;
             SubDomains = new List<DomainTreeNode>();
             Cache = new List<DnsRecord>();
+            Authority = new List<DnsRecord>();
+            AdditionalInfo = new List<DnsRecord>();
         }
         public string Label { get; set; }
 
         public DomainTreeNode Parent { get; set; }
         public List<DomainTreeNode> SubDomains { get; set; }
         public List<DnsRecord> Cache { get; set; }
+        public List<DnsRecord> Authority { get; set; }
+        public List<DnsRecord> AdditionalInfo { get; set; }
 
         public DomainTreeNode Resolve(string path)
         {
@@ -48,6 +52,9 @@ namespace DnsCache.DnsDataBase
                     yield return rec;
             else
                 foreach (var rec in Cache.Where(record => types.Contains(record.Type)))
+                    yield return rec;
+            if (types.Contains(DnsQueryType.NS))
+                foreach (var rec in Authority.Where(record => record.Type == DnsQueryType.NS))
                     yield return rec;
             
             if (!recursive) 
@@ -84,18 +91,26 @@ namespace DnsCache.DnsDataBase
         public void Tick()
         {
             Cache.RemoveAll(record => record.IsOutdated);
+            Authority.RemoveAll(record => record.IsOutdated);
+            AdditionalInfo.RemoveAll(record => record.IsOutdated);
             foreach (var subdomain in SubDomains)
                 subdomain.Tick();
         }
 
-        public void AddNewData(string path, ResourceRecord record)
+        public void AddNewData(string path, ResourceRecord record, DnsResourceRecordType target = DnsResourceRecordType.Cache)
         {
             while (path.EndsWith("."))
                 path = path.Remove(path.Length - 1);
             var pos = path.LastIndexOf(".", StringComparison.Ordinal);
             if (pos < 0)
             {
-                Cache.Add(new DnsRecord(record));
+                var dnsrecord = new DnsRecord(record);
+                if (target.HasFlag(DnsResourceRecordType.Cache))
+                    Cache.Add(dnsrecord);
+                if (target.HasFlag(DnsResourceRecordType.Authority))
+                    Authority.Add(dnsrecord);
+                if (target.HasFlag(DnsResourceRecordType.AdditionalInfo))
+                    AdditionalInfo.Add(dnsrecord);
                 return;
             }
             var label = path.Substring(pos + 1);
@@ -105,7 +120,15 @@ namespace DnsCache.DnsDataBase
                 subDomain = new DomainTreeNode(label, this);
                 SubDomains.Add(subDomain);
             }
-            subDomain.AddNewData(string.Join(".", path.Substring(0, pos)), record);
+            subDomain.AddNewData(string.Join(".", path.Substring(0, pos)), record, target);
         }
+    }
+
+    [Flags]
+    public enum DnsResourceRecordType
+    {
+        Cache = 1,
+        Authority = 2,
+        AdditionalInfo = 4
     }
 }

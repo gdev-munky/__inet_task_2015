@@ -35,7 +35,7 @@ namespace DnsCache.DnsPacket
 
         public void FromBytes(byte[] bytes, ref int offset)
         {
-            Key = RequestRecord.ReadDnsStringFromBytes(bytes, ref offset, 0);
+            Key = RequestRecord.ReadDnsStringFromBytes(bytes, ref offset);
             Type = (DnsQueryType)BEBitConverter.ToUInt16(bytes, offset); offset += 2;
             Class = (DnsQueryClass)BEBitConverter.ToUInt16(bytes, offset); offset += 2;
             TTL = BEBitConverter.ToInt32(bytes, offset); offset += 4;
@@ -61,7 +61,7 @@ namespace DnsCache.DnsPacket
                 {
                     int offset = dataOffset;
                     var bts = new List<byte>();
-                    RequestRecord.WriteDnsString(bts, RequestRecord.ReadDnsStringFromBytes(packet, ref offset, 0));
+                    RequestRecord.WriteDnsString(bts, RequestRecord.ReadDnsStringFromBytes(packet, ref offset));
                     Data = bts.ToArray();
                 }
                 break;
@@ -69,8 +69,8 @@ namespace DnsCache.DnsPacket
                 {
                     int offset = dataOffset;
                     var bts = new List<byte>();
-                    var s1 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset, 0);
-                    var s2 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset, 0);
+                    var s1 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset);
+                    var s2 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset);
                     RequestRecord.WriteDnsString(bts, s1);
                     RequestRecord.WriteDnsString(bts, s2);
                     Data = bts.ToArray();
@@ -80,11 +80,11 @@ namespace DnsCache.DnsPacket
                     {
                         int offset = dataOffset;
                         var bts = new List<byte>();
-                        var s1 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset, 0);
-                        var s2 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset, 0);
+                        var s1 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset);
+                        var s2 = RequestRecord.ReadDnsStringFromBytes(packet, ref offset);
                         RequestRecord.WriteDnsString(bts, s1);
                         RequestRecord.WriteDnsString(bts, s2);
-                        bts.AddRange(Data.Skip(offset));
+                        bts.AddRange(Data.Skip(offset - dataOffset));
                         Data = bts.ToArray();
                     }
                     break;
@@ -94,7 +94,7 @@ namespace DnsCache.DnsPacket
                 case DnsQueryType.MX:
                     {
                         int offset = dataOffset+2;
-                        var str = RequestRecord.ReadDnsStringFromBytes(packet, ref offset, 0);
+                        var str = RequestRecord.ReadDnsStringFromBytes(packet, ref offset);
                         var bts = new List<byte>();
                         bts.AddRange(Data.Take(2));
                         RequestRecord.WriteDnsString(bts, str);
@@ -110,6 +110,9 @@ namespace DnsCache.DnsPacket
             {
                 case DnsQueryType.A:
                     str = string.Join(".", Data);
+                    break;
+                case DnsQueryType.AAAA:
+                    str = string.Join(".", Data.Select(b => string.Format("{0:X2}", b)));
                     break;
                 case DnsQueryType.NS:
                 case DnsQueryType.CNAME:
@@ -162,7 +165,7 @@ namespace DnsCache.DnsPacket
                     str = Encoding.ASCII.GetString(Data);
                     break;
             }
-            return "[" + Type + "]: " + str;
+            return Key + "\\[" + Type + "]: " + str;
         }
     }
 }

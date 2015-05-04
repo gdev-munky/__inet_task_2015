@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Net;
+using System.Linq;
 using System.Text;
 using DnsCache.DnsPacket;
 
@@ -8,6 +8,7 @@ namespace DnsCache.DnsDataBase
 {
     public class DnsRecord
     {
+        public string Key { get; private set; }
         public DnsQueryType Type { get; set; }
         public byte[] Data { get; set; }
 
@@ -19,9 +20,12 @@ namespace DnsCache.DnsDataBase
         }
         public int TTL { get; set; }
         public bool IsOutdated { get { return DateTime.Now > ExpirationTime; } }
+        public TimeSpan TimeLeft { get { return DateTime.Now - ExpirationTime; } }
+        public int SecondsLeft { get { return (int) TimeLeft.TotalSeconds; } }
 
         public DnsRecord(ResourceRecord resource)
         {
+            Key = resource.Key;
             Type = resource.Type;
             TTL = resource.TTL;
             Data = resource.Data;
@@ -39,6 +43,17 @@ namespace DnsCache.DnsDataBase
                 Type = Type
             };
         }
+        public ResourceRecord GetResourceRecord(int newTtl = 60*60*24*2)
+        {
+            return new ResourceRecord
+            {
+                Class = DnsQueryClass.IN,
+                Data = Data,
+                Key = Key,
+                TTL = newTtl,
+                Type = Type
+            };
+        }
 
         public override string ToString()
         {
@@ -47,6 +62,9 @@ namespace DnsCache.DnsDataBase
             {
                 case DnsQueryType.A:
                     str = string.Join(".", Data);
+                    break;
+                case DnsQueryType.AAAA:
+                    str = string.Join(".", Data.Select(b => string.Format("{0:X2}", b)));
                     break;
                 case DnsQueryType.NS:
                 case DnsQueryType.CNAME:
@@ -58,15 +76,15 @@ namespace DnsCache.DnsDataBase
                 case DnsQueryType.MF:
                     {
                         int offset = 0;
-                        str = RequestRecord.ReadDnsStringFromBytes(Data, ref offset, 0);
+                        str = RequestRecord.ReadDnsStringFromBytes(Data, ref offset);
                         break;
                     }
                 case DnsQueryType.MINFO:
                     {
                         int offset = 0;
                         var bts = new List<byte>();
-                        var s1 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset, 0);
-                        var s2 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset, 0);
+                        var s1 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset);
+                        var s2 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset);
                         str = string.Format("{0}, {1}", s1, s2);
                         break;
                     }
@@ -74,8 +92,8 @@ namespace DnsCache.DnsDataBase
                     {
                         int offset = 0;
                         var bts = new List<byte>();
-                        var s1 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset, 0);
-                        var s2 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset, 0);
+                        var s1 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset);
+                        var s2 = RequestRecord.ReadDnsStringFromBytes(Data, ref offset);
                         var d1 = BEBitConverter.ToUInt32(Data, offset); offset += 4;
                         var d2 = BEBitConverter.ToInt32(Data, offset); offset += 4;
                         var d3 = BEBitConverter.ToInt32(Data, offset); offset += 4;
@@ -91,7 +109,7 @@ namespace DnsCache.DnsDataBase
                         var pref = BEBitConverter.ToInt16(Data, 0);
                         int offset = 2;
                         str = string.Format("{0} (pref: {1})",
-                            RequestRecord.ReadDnsStringFromBytes(Data, ref offset, 0),
+                            RequestRecord.ReadDnsStringFromBytes(Data, ref offset),
                             pref);
                         break;
                     }
@@ -99,7 +117,7 @@ namespace DnsCache.DnsDataBase
                     str = Encoding.ASCII.GetString(Data);
                     break;
             }
-            return "[" + Type + "]: " + str;
+            return Key + "\\[" + Type + "]: " + str;
         }
     }
 }

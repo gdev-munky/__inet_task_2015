@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using DnsCache.DnsDataBase;
 using DnsCache.DnsPacket;
 
 namespace DnsCache
@@ -22,9 +24,15 @@ namespace DnsCache
         }
         public bool TimedOut { get { return DateTime.Now > TimeSent.AddSeconds(3); } }
 
-        public Packet AppendNewData(IEnumerable<ResourceRecord> records)
+        public Packet AppendNewData(IEnumerable<ResourceRecord> records, DnsResourceRecordType target = DnsResourceRecordType.Cache)
         {
-            Packet.Answers.AddRange(records);
+            var resourceRecords = records as ResourceRecord[] ?? records.ToArray();
+            if (target.HasFlag(DnsResourceRecordType.Cache))
+                Packet.Answers.AddRange(resourceRecords);
+            if (target.HasFlag(DnsResourceRecordType.Authority))
+                Packet.AuthorityRecords.AddRange(resourceRecords);
+            if (target.HasFlag(DnsResourceRecordType.AdditionalInfo))
+                Packet.AdditionalRecords.AddRange(resourceRecords);
             return Packet;
         }
     }
