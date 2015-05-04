@@ -73,6 +73,7 @@ namespace DnsCache.DnsPacket
             Answers = new List<ResourceRecord>();
             AuthorityRecords = new List<ResourceRecord>();
             AdditionalRecords = new List<ResourceRecord>();
+            Flags = DnsPacketFlags.AnswerIsAuthoritative;
         }
     }
 

@@ -43,8 +43,12 @@ namespace DnsCache.DnsDataBase
 
         public IEnumerable<DnsRecord> GetAllRecords(bool recursive = false, params DnsQueryType[] types)
         {
-            foreach (var rec in Cache.Where(record => types.Contains(record.Type)))
-                yield return rec;
+            if (types.Contains(DnsQueryType.ANY))
+                foreach (var rec in Cache)
+                    yield return rec;
+            else
+                foreach (var rec in Cache.Where(record => types.Contains(record.Type)))
+                    yield return rec;
             
             if (!recursive) 
                 yield break;

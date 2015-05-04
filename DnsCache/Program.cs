@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using DnsCache.DnsDataBase;
 
@@ -12,9 +13,9 @@ namespace DnsCache
         internal static Random Rnd;
         static void Main(string[] args)
         {
-            if (args.Length != 1)
+            if (args.Length < 1 || args.Length > 2)
             {
-                Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip>");
+                ReportUsage();
                 return;
             }
             Rnd = new Random();
@@ -25,25 +26,41 @@ namespace DnsCache
             {
                 try
                 {
-                    var entries = Dns.GetHostEntry(args[0]);
-                    if (entries.AddressList.Length < 0)
+                    var entries = Dns.GetHostEntry(args[0]).AddressList;
+                    Console.WriteLine(string.Join("; ", entries.Cast<object>()));
+                    if (entries.Length < 0)
+                    {
+                        Console.WriteLine("Failed to resolve '{0}'", args[0]);
                         return;
-                    ip = entries.AddressList.First();
+                    }
+                    ip = entries.First(address => address.AddressFamily == AddressFamily.InterNetwork);
+                    Console.WriteLine("Selected : " + ip);
                 }
-                catch (Exception)
+                catch
                 {
-                    Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip>");
+                    ReportUsage();
                     return;
                 }
             }
             dns.ParentServer = new IPEndPoint(ip, 53);
+            ushort port = 53;
+            if (args.Length == 2)
+            {
+                if (!ushort.TryParse(args[1], out port))
+                {
+                    ReportUsage();
+                    return;
+                }
+            }
+
+            dns.Port = port;
+
             var t = new Thread(() => dns.Listen());
             t.Start();
-            Console.WriteLine("Listening...");
+            Console.WriteLine("Listening... (write 'exit' to exit)");
             var s = (Console.ReadLine()??"").ToLowerInvariant();
             while (s != "exit")
             {
-                Console.WriteLine("Write exit to exit");
                 s = (Console.ReadLine() ?? "").ToLowerInvariant();
             }
             dns.ShouldRun = false;
@@ -53,12 +70,12 @@ namespace DnsCache
             var f = new StreamWriter("log.txt");
             foreach (var domain in dns.DomainRoot.SubDomains)
             {
-                printDomain(domain, f);
+                PrintDomain(domain, f);
             }
             f.Close();
         }
 
-        static void printDomain(DomainTreeNode domain, StreamWriter f, string offset = "")
+        static void PrintDomain(DomainTreeNode domain, StreamWriter f, string offset = "")
         {
             f.WriteLine(offset + "#DOMAIN: " + domain.AccumulateLabels());
             offset += "\t";
@@ -68,8 +85,13 @@ namespace DnsCache
             }
             foreach (var d in domain.SubDomains)
             {
-                printDomain(d,f, offset);
+                PrintDomain(d,f, offset);
             }
+        }
+
+        static void ReportUsage()
+        {
+            Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip> <[port]>");
         }
 
     }

@@ -17,14 +17,29 @@ namespace DnsCache
         public bool ShouldRun { get; set; }
         private Socket UdpSocket { get; set; }
         private Socket TcpSocket { get; set; }
+        public ushort Port { get; set; }
 
         internal List<PrecacheTask> Tasks = new List<PrecacheTask>();
 
-        public void Listen(int port = 53)
+        public void Listen()
         {
             DomainRoot = new DomainTreeNode();
             UdpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            UdpSocket.Bind(new IPEndPoint(IPAddress.Any, port));
+            try
+            {
+                UdpSocket.Bind(new IPEndPoint(IPAddress.Any, Port));
+            }
+            catch
+            {
+                Console.WriteLine("Failed to bind to UDP port "+ Port);
+                return;
+            }
+
+            if (Equals(ParentServer, UdpSocket.LocalEndPoint))
+            {
+                Console.WriteLine("Forwarder address == My address; Failed to initialize");
+                return;
+            }
             IsRunning = true;
             var tickThread = new Thread(Tick);
             tickThread.Start();
@@ -50,8 +65,9 @@ namespace DnsCache
                 if (offset > len)
                     Console.WriteLine(sender + ": sent unknown shit");
                 if (p.Flags.IsQuery())
-                        HandleQuery((IPEndPoint) sender, p);
-                else HandleResponse((IPEndPoint)sender, p);
+                    HandleQuery((IPEndPoint) sender, p);
+                else 
+                    HandleResponse((IPEndPoint)sender, p);
                 
             }
 
@@ -84,13 +100,16 @@ namespace DnsCache
         {
             PrecacheTask task;
             lock (Tasks)
-            
+            {
                 task = Tasks.FirstOrDefault(t => t.ParentId == p.Id);
                 if (task == null)
                 {
-                    Console.WriteLine(sender + ": sent response, but we don`t have a task to wait one. (or timeout has occured)");
+                    Console.WriteLine(sender +
+                                      ": sent response, but we don`t have a task to wait one. (or timeout has occured)");
                     return;
                 }
+                Tasks.Remove(task);
+            }
             lock (DomainRoot)
             {
                 foreach (var rec in p.Answers)
@@ -100,6 +119,13 @@ namespace DnsCache
                 }
             }
             task.AppendNewData(p.Answers);
+            if (task.Packet.Answers.Count < 1)
+            {
+                task.Packet.Flags |= DnsPacketFlags.NameError;
+                if (!p.Flags.IsSuccessfull())
+                    task.Packet.Flags = p.Flags;
+            }
+            
             UdpSocket.SendTo(task.Packet.GetBytes(), task.Client);
             Console.WriteLine(task.Client + ": precaching complete from " + sender);
         }
