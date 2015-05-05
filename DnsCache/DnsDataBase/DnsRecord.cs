@@ -21,7 +21,11 @@ namespace DnsCache.DnsDataBase
         public int TTL { get; set; }
         public bool IsOutdated { get { return DateTime.Now > ExpirationTime; } }
         public TimeSpan TimeLeft { get { return DateTime.Now - ExpirationTime; } }
-        public int SecondsLeft { get { return (int) TimeLeft.TotalSeconds; } }
+        public int SecondsLeft
+        {
+            get { return (int) TimeLeft.TotalSeconds; }
+            set { ExpirationTime = DateTime.Now.AddSeconds(value); }
+        }
 
         public DnsRecord(ResourceRecord resource)
         {

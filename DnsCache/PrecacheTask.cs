@@ -9,6 +9,7 @@ namespace DnsCache
 {
     internal class PrecacheTask
     {
+        public bool NoFrowarding { get; set; }
         public ushort ClientId { get; set; }
         public ushort ParentId { get; set; }
         public Packet Packet { get; set; }
@@ -21,6 +22,14 @@ namespace DnsCache
             ParentId = pid;
             Packet = p;
             TimeSent = DateTime.Now;
+            NoFrowarding = false;
+        }
+        public PrecacheTask(ushort pid, Packet p)
+        {
+            ParentId = pid;
+            Packet = p;
+            TimeSent = DateTime.Now;
+            NoFrowarding = true;
         }
         public bool TimedOut { get { return DateTime.Now > TimeSent.AddSeconds(3); } }
 

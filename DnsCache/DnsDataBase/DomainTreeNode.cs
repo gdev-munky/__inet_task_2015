@@ -28,14 +28,14 @@ namespace DnsCache.DnsDataBase
         {
             while (path.EndsWith("."))
                 path = path.Remove(path.Length - 1);
-            var pos = path.LastIndexOf(".", StringComparison.Ordinal);
-            if (pos < 0)
+            if (path.Length < 1)
                 return this;
-            var label = path.Substring(pos + 1);
+            var pos = path.LastIndexOf(".", StringComparison.Ordinal);
+            var label = (pos < 0) ? path : path.Substring(pos + 1);
             var subDomain = SubDomains.FirstOrDefault(node => node.Label == label);
             if (subDomain == null)
                 return null;
-            return subDomain.Resolve(string.Join(".", path.Substring(0, pos)));
+            return subDomain.Resolve((pos < 0) ? "":string.Join(".", path.Substring(0, pos)));
         }
         public string AccumulateLabels()
         {
@@ -97,30 +97,78 @@ namespace DnsCache.DnsDataBase
                 subdomain.Tick();
         }
 
-        public void AddNewData(string path, ResourceRecord record, DnsResourceRecordType target = DnsResourceRecordType.Cache)
+        public bool AddNewData(string path, ResourceRecord record,
+            DnsResourceRecordType target = DnsResourceRecordType.Cache)
         {
             while (path.EndsWith("."))
                 path = path.Remove(path.Length - 1);
             var pos = path.LastIndexOf(".", StringComparison.Ordinal);
-            if (pos < 0)
+
+            if (path.Length < 1)
             {
+                var worked = false;
                 var dnsrecord = new DnsRecord(record);
                 if (target.HasFlag(DnsResourceRecordType.Cache))
-                    Cache.Add(dnsrecord);
+                {
+                    var sameRecord = Cache.FirstOrDefault(r => r.Type == record.Type && Equals(r.Data, record.Data));
+                    if (sameRecord != null)
+                    {
+                        if (sameRecord.SecondsLeft < record.TTL)
+                            sameRecord.SecondsLeft = record.TTL;
+                    }
+                    else
+                    {
+                        Cache.Add(dnsrecord);
+                        worked = true;
+                    }
+                }
                 if (target.HasFlag(DnsResourceRecordType.Authority))
-                    Authority.Add(dnsrecord);
+                {
+                    var sameRecord = Authority.FirstOrDefault(r => r.Type == record.Type && Equals(r.Data, record.Data));
+                    if (sameRecord != null)
+                    {
+                        if (sameRecord.SecondsLeft < record.TTL)
+                            sameRecord.SecondsLeft = record.TTL;
+                    }
+                    else
+                    {
+                        Authority.Add(dnsrecord);
+                        worked = true;
+                    }
+                }
                 if (target.HasFlag(DnsResourceRecordType.AdditionalInfo))
-                    AdditionalInfo.Add(dnsrecord);
-                return;
+                {
+                    var sameRecord =
+                        AdditionalInfo.FirstOrDefault(r => r.Type == record.Type && Equals(r.Data, record.Data));
+                    if (sameRecord != null)
+                    {
+                        if (sameRecord.SecondsLeft < record.TTL)
+                            sameRecord.SecondsLeft = record.TTL;
+                    }
+                    else
+                    {
+                        AdditionalInfo.Add(dnsrecord);
+                        worked = true;
+                    }
+                }
+                return worked;
             }
-            var label = path.Substring(pos + 1);
+
+            var label = (pos < 0) ? path : path.Substring(pos + 1);
             var subDomain = SubDomains.FirstOrDefault(node => node.Label == label);
             if (subDomain == null)
             {
                 subDomain = new DomainTreeNode(label, this);
                 SubDomains.Add(subDomain);
             }
-            subDomain.AddNewData(string.Join(".", path.Substring(0, pos)), record, target);
+            return subDomain.AddNewData((pos < 0) ? "" :string.Join(".", path.Substring(0, pos)), record, target);
+        }
+
+        internal static bool Equals(byte[] a, byte[] b)
+        {
+            if (a.Length != b.Length)
+                return false;
+            return !a.Where((t, i) => t != b[i]).Any();
         }
     }
 

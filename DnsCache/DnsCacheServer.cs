@@ -117,35 +117,62 @@ namespace DnsCache
                 if (task == null)
                 {
                     Console.WriteLine(sender +
-                                      ": sent response, but we don`t have a task to wait one. (or timeout has occured)");
+                                      ": either dns-poison attempt or just too slow answer");
+                    foreach (var a in p.Answers)
+                    {
+                        Console.WriteLine("\t" + a);
+                    }
                     return;
                 }
                 Tasks.Remove(task);
             }
+
+
             lock (DomainRoot)
             {
+                Console.WriteLine("[ ]: Got response for [{0} #{1:X4}]", task.Client, task.ClientId);
                 foreach (var rec in p.Answers)
                 {
-                    DomainRoot.AddNewData(rec.Key, rec);
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("[+]: Answer for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec, rec.TTL, task.ClientId);
+                    var added = false;
+                    foreach (var key in p.Queries.Select(record => record.Key))
+                        if (DomainRoot.AddNewData(key, rec))
+                            added = true;
+                    if (DomainRoot.AddNewData(rec.Key, rec))
+                        added = true;
+                    Console.ForegroundColor = added ? ConsoleColor.Green : ConsoleColor.Gray;
+                    Console.WriteLine("[+]: Answer for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec, rec.TTL,
+                        task.ClientId);
                     Console.ForegroundColor = ConsoleColor.White;
                 }
                 foreach (var rec in p.AuthorityRecords)
                 {
-                    DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.Authority);
-                    Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine("[+]: Authority for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec, rec.TTL, task.ClientId);
+                    var added = false;
+                    foreach (var key in p.Queries.Select(record => record.Key))
+                        if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.Authority))
+                            added = true;
+                    if (DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.Authority))
+                        added = true;
+                    Console.ForegroundColor = added ? ConsoleColor.Cyan : ConsoleColor.Gray;
+                    Console.WriteLine("[+]: Authority for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec,
+                        rec.TTL, task.ClientId);
                     Console.ForegroundColor = ConsoleColor.White;
                 }
                 foreach (var rec in p.AdditionalRecords)
                 {
-                    DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.AdditionalInfo);
-                    Console.ForegroundColor = ConsoleColor.DarkGreen;
-                    Console.WriteLine("[+]: Additional info for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec, rec.TTL, task.ClientId);
+                    var added = false;
+                    foreach (var key in p.Queries.Select(record => record.Key))
+                        if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.AdditionalInfo))
+                            added = true;
+                    if (DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.AdditionalInfo))
+                        added = true;
+                    Console.ForegroundColor = added ? ConsoleColor.DarkGreen : ConsoleColor.Gray;
+                    Console.WriteLine("[+]: Additional info for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec,
+                        rec.TTL, task.ClientId);
                     Console.ForegroundColor = ConsoleColor.White;
                 }
             }
+            if (task.NoFrowarding)
+                return;
             task.AppendNewData(p.Answers);
             task.AppendNewData(p.AuthorityRecords, DnsResourceRecordType.Authority);
             task.AppendNewData(p.AdditionalRecords, DnsResourceRecordType.AdditionalInfo);
@@ -161,17 +188,16 @@ namespace DnsCache
 
         internal void HandleQuery(IPEndPoint sender, Packet p)
         {
-            var unknown = new List<Tuple<string, DnsQueryType>>();
-            var answer = new Packet
-            {
-                Id = p.Id,
-                Flags = DnsPacketFlags.Response
-            };
-            answer.Queries.AddRange(p.Queries);
+            var unknown = new List<RequestRecord>();
             var inv = p.Flags.HasFlag(DnsPacketFlags.Inverse);
             if (inv)
             {
-                answer.Flags |= DnsPacketFlags.Inverse;
+                var answer = new Packet
+                {
+                    Id = p.Id,
+                    Flags = DnsPacketFlags.Response |  DnsPacketFlags.Inverse
+                };
+                answer.Queries.AddRange(p.Queries);
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine(sender + ": sent inversed request");
                 Console.ForegroundColor = ConsoleColor.White;
@@ -184,6 +210,9 @@ namespace DnsCache
                 UdpSocket.SendTo(rp.GetBytes(), sender);
                 return;
             }
+            IEnumerable<ResourceRecord> knownAnswers = null;
+            IEnumerable<ResourceRecord> knownAuth = null;
+            IEnumerable<ResourceRecord> knownInfo = null;
             foreach (var q in p.Queries)
             {
                 if (q.Class != DnsQueryClass.IN)
@@ -199,37 +228,93 @@ namespace DnsCache
                     node = DomainRoot.Resolve(q.Key);
                 if (node == null)
                 {
-                    unknown.Add(new Tuple<string, DnsQueryType>(q.Key, q.Type));
+                    unknown.Add(q);
                     continue;
                 }
                 var resources = node.GetAllRecords(false, q.Type).ToArray();
+                knownAnswers = resources.Select(
+                    record =>
+                        record.GetResourceRecord(record.SecondsLeft));
+                knownAuth = node.Authority.Select(
+                    record =>
+                        record.GetResourceRecord(record.SecondsLeft));
+                knownInfo = node.AdditionalInfo.Select(
+                    record =>
+                        record.GetResourceRecord(record.SecondsLeft));
                 if (resources.Length < 1)
-                {
-                    unknown.Add(new Tuple<string, DnsQueryType>(q.Key, q.Type));
-                    continue;
-                }
-                p.Answers.AddRange(
-                    resources.Select(
-                        record =>
-                            record.GetResourceRecord(record.SecondsLeft)));
+                    unknown.Add(q);
             }
             if (unknown.Count < 1)
             {
                 Console.WriteLine("[ ]: Answering client [{0} #{1:X4}] (immediately)", sender, p.Id);
-                UdpSocket.SendTo(p.GetBytes(), sender);
+                SendDnsResponseTo(sender, p.Id, p.Queries, knownAnswers, knownAuth, knownInfo);
                 return;
-            }
-            var newRequest = DomainTreeNode.FormRequest(false, unknown.ToArray());
+            } 
+            lock (Tasks)
+                foreach (var t in Tasks)
+                    if (!t.Packet.Queries.Except(unknown).Any())
+                        return;
+            
+            SendDnsRequestTo(ParentServer, p.Id, sender, unknown, knownAuth, knownInfo);
+        }
+
+        /// <summary>
+        /// Without forwarding
+        /// </summary>
+        /// <param name="target"></param>
+        /// <param name="requests"></param>
+        internal void SendDnsRequestTo(EndPoint target, params RequestRecord[] requests)
+        {
+            var p = DomainTreeNode.FormRequest(false, requests);
+            p.Flags |= DnsPacketFlags.RecursionIsDesired;
             lock (Tasks)
             {
-                foreach (var t in Tasks)
-                {
-                    if (!t.Packet.Queries.Except(newRequest.Queries).Any())
-                        return;
-                }
-                Tasks.Add(new PrecacheTask(p.Id, newRequest.Id, answer) { Client = sender });
+                Tasks.Add(new PrecacheTask(p.Id, p));
             }
-            UdpSocket.SendTo(newRequest.GetBytes(), ParentServer);
+            UdpSocket.SendTo(p.GetBytes(), target);
+        }
+        /// <summary>
+        /// With forwaridng
+        /// </summary>
+        /// <param name="target"></param>
+        /// <param name="clientId"></param>
+        /// <param name="client"></param>
+        /// <param name="requests"></param>
+        internal void SendDnsRequestTo(EndPoint target, ushort clientId, IPEndPoint client, 
+            IEnumerable<RequestRecord> requests, 
+            IEnumerable<ResourceRecord> knownAuthority = null,
+            IEnumerable<ResourceRecord> knownInfo = null)
+        {
+            var p = DomainTreeNode.FormRequest(false, requests.ToArray());
+            p.Flags |= DnsPacketFlags.RecursionIsDesired;
+            if (knownAuthority != null)
+                p.AuthorityRecords = knownAuthority.ToList();
+            if (knownInfo != null)
+                p.AdditionalRecords = knownInfo.ToList();
+            lock (Tasks)
+            {
+                Tasks.Add(new PrecacheTask(clientId, p.Id, p)
+                {
+                    Client = client
+                });
+            }
+            UdpSocket.SendTo(p.GetBytes(), target);
+        }
+        internal void SendDnsResponseTo(EndPoint target, ushort id, IEnumerable<RequestRecord> requests, IEnumerable<ResourceRecord> answers, IEnumerable<ResourceRecord> auth, IEnumerable<ResourceRecord> inf, DnsPacketFlags flags = DnsPacketFlags.Response)
+        {
+            var p = new Packet
+            {
+                Id = id,
+                Flags = flags,
+                Queries = requests.ToList()
+            };
+            if (answers != null)
+                p.Answers = answers.ToList();
+            if (auth != null)
+                p.AuthorityRecords = auth.ToList();
+            if (inf != null)
+                p.AdditionalRecords = inf.ToList();
+            UdpSocket.SendTo(p.GetBytes(), target);
         }
     }
 }

