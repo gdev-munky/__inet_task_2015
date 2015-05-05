@@ -20,7 +20,7 @@ namespace DnsCache.DnsDataBase
         }
         public int TTL { get; set; }
         public bool IsOutdated { get { return DateTime.Now > ExpirationTime; } }
-        public TimeSpan TimeLeft { get { return DateTime.Now - ExpirationTime; } }
+        public TimeSpan TimeLeft { get { return ExpirationTime - DateTime.Now; } }
         public int SecondsLeft
         {
             get { return (int) TimeLeft.TotalSeconds; }

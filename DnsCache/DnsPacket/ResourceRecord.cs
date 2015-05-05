@@ -98,6 +98,7 @@ namespace DnsCache.DnsPacket
                         var bts = new List<byte>();
                         bts.AddRange(Data.Take(2));
                         RequestRecord.WriteDnsString(bts, str);
+                        Data = bts.ToArray();
                         break;
                     }
             }

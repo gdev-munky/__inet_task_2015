@@ -23,15 +23,16 @@ namespace DnsCache
             var dns = new DnsCacheServer {ShouldRun = true};
 
             var ip = IPAddress.Any;
-            if (!IPAddress.TryParse(args[0], out ip))
+            var ipWords = args[0].Split(':');
+            if (!IPAddress.TryParse(ipWords[0], out ip))
             {
                 try
                 {
-                    var entries = Dns.GetHostEntry(args[0]).AddressList;
+                    var entries = Dns.GetHostEntry(ipWords[0]).AddressList;
                     Console.WriteLine(string.Join("; ", entries.Cast<object>()));
                     if (entries.Length < 0)
                     {
-                        Console.WriteLine("Failed to resolve '{0}'", args[0]);
+                        Console.WriteLine("Failed to resolve '{0}'", ipWords[0]);
                         return;
                     }
                     ip = entries.First(address => address.AddressFamily == AddressFamily.InterNetwork);
@@ -43,22 +44,24 @@ namespace DnsCache
                     return;
                 }
             }
-            dns.ParentServer = new IPEndPoint(ip, 53);
-            ushort port = 53;
+            ushort listenPort = 53;
+            ushort remotePort = 53;
+            if (ipWords.Length > 1)
+                ushort.TryParse(ipWords[1], out listenPort);
+            dns.Port = listenPort;
             if (args.Length == 2)
             {
-                if (!ushort.TryParse(args[1], out port))
+                if (!ushort.TryParse(args[1], out remotePort))
                 {
                     ReportUsage();
                     return;
                 }
             }
-
-            dns.Port = port;
+            dns.ParentServer = new IPEndPoint(ip, remotePort);
 
             var t = new Thread(() => dns.Listen());
             t.Start();
-            Console.Title = "DNS Cache Server at port " + port;
+            Console.Title = "DNS Cache Server at port " + listenPort;
             Console.WriteLine("Listening... (write 'exit' to exit)");
             var s = (Console.ReadLine()??"").ToLowerInvariant();
             while (s != "exit")
@@ -75,7 +78,8 @@ namespace DnsCache
                         if (!Enum.TryParse(words[1], true, out a0))
                             break;
                         var a1 = words[2];
-                        dns.SendDnsRequestTo(dns.ParentServer, new RequestRecord{Class = DnsQueryClass.IN, Key = a1, Type = a0});
+                        dns.SendDnsRequestTo(dns.ParentServer, new RequestRecord { Class = DnsQueryClass.IN, Key = a1, Type = a0 });
+                        Console.WriteLine("[!]: Sent!");
                         break;
                     }
                     case "?l":
@@ -112,6 +116,7 @@ namespace DnsCache
                         if (!IPAddress.TryParse(words[3], out a2))
                             break;
                         dns.SendDnsRequestTo(new IPEndPoint(a2, 53), new RequestRecord { Class = DnsQueryClass.IN, Key = a1, Type = a0 });
+                        Console.WriteLine("[!]: Sent!");
                         break;
                     }
                     case "poison":
@@ -177,7 +182,7 @@ namespace DnsCache
 
         static void ReportUsage()
         {
-            Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip> <[listen_port]>");
+            Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip>:<[port]> <[listen_port]>");
         }
 
     }

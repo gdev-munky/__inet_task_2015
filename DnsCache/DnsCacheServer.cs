@@ -97,7 +97,7 @@ namespace DnsCache
                 lock (Tasks)
                     Tasks.RemoveAll(task =>
                     {
-                        if (!task.TimedOut)
+                        if (!task.TimedOut || task.NoFrowarding)
                             return false;
                         task.Packet.Flags |= DnsPacketFlags.RefusedError;
                         UdpSocket.SendTo(task.Packet.GetBytes(), task.Client);
