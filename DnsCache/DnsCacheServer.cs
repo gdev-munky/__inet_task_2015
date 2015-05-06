@@ -18,6 +18,7 @@ namespace DnsCache
         private Socket UdpSocket { get; set; }
         private Socket TcpSocket { get; set; }
         public ushort Port { get; set; }
+        public bool AntiPoison { get; set; }
 
         internal List<PrecacheTask> Tasks = new List<PrecacheTask>();
 
@@ -121,6 +122,39 @@ namespace DnsCache
                     foreach (var a in p.Answers)
                     {
                         Console.WriteLine("\t" + a);
+                    }
+                    if (!AntiPoison)
+                    {
+                        foreach (var rec in p.Answers)
+                        {
+                            var added = false;
+                            foreach (var key in p.Queries.Select(record => record.Key))
+                                if (DomainRoot.AddNewData(key, rec))
+                                    added = true;
+                            Console.ForegroundColor = added ? ConsoleColor.Red : ConsoleColor.Gray;
+                            Console.WriteLine("[+]: Wierd answer added: {0}; ttl: {1} s", rec, rec.TTL);
+                            Console.ForegroundColor = ConsoleColor.White;
+                        }
+                        foreach (var rec in p.AuthorityRecords)
+                        {
+                            var added = false;
+                            foreach (var key in p.Queries.Select(record => record.Key))
+                                if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.Authority))
+                                    added = true;
+                            Console.ForegroundColor = added ? ConsoleColor.Red : ConsoleColor.Gray;
+                            Console.WriteLine("[+]: Wierd authority added: {0}; ttl: {1} s", rec, rec.TTL);
+                            Console.ForegroundColor = ConsoleColor.White;
+                        }
+                        foreach (var rec in p.AdditionalRecords)
+                        {
+                            var added = false;
+                            foreach (var key in p.Queries.Select(record => record.Key))
+                                if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.AdditionalInfo))
+                                    added = true;
+                            Console.ForegroundColor = added ? ConsoleColor.Red : ConsoleColor.Gray;
+                            Console.WriteLine("[+]: Wierd info added: {0}; ttl: {1} s", rec, rec.TTL);
+                            Console.ForegroundColor = ConsoleColor.White;
+                        }
                     }
                     return;
                 }
@@ -231,7 +265,8 @@ namespace DnsCache
                     unknown.Add(q);
                     continue;
                 }
-                var resources = node.GetAllRecords(false, q.Type).ToArray();
+                var resources = node.GetAllRecords(false, q.Type).ToList();
+                resources.Sort((a, b) => a.ExpirationTime < b.ExpirationTime ? 1 : (a.ExpirationTime == b.ExpirationTime ? 0 : -1));
                 knownAnswers = resources.Select(
                     record =>
                         record.GetResourceRecord(record.SecondsLeft));
@@ -241,7 +276,7 @@ namespace DnsCache
                 knownInfo = node.AdditionalInfo.Select(
                     record =>
                         record.GetResourceRecord(record.SecondsLeft));
-                if (resources.Length < 1)
+                if (resources.Count < 1)
                     unknown.Add(q);
             }
             if (unknown.Count < 1)
@@ -300,7 +335,10 @@ namespace DnsCache
             }
             UdpSocket.SendTo(p.GetBytes(), target);
         }
-        internal void SendDnsResponseTo(EndPoint target, ushort id, IEnumerable<RequestRecord> requests, IEnumerable<ResourceRecord> answers, IEnumerable<ResourceRecord> auth, IEnumerable<ResourceRecord> inf, DnsPacketFlags flags = DnsPacketFlags.Response)
+
+        internal void SendDnsResponseTo(EndPoint target, ushort id, IEnumerable<RequestRecord> requests,
+            IEnumerable<ResourceRecord> answers, IEnumerable<ResourceRecord> auth, IEnumerable<ResourceRecord> inf,
+            DnsPacketFlags flags = DnsPacketFlags.Response | DnsPacketFlags.AnswerIsAuthoritative)
         {
             var p = new Packet
             {

@@ -20,7 +20,7 @@ namespace DnsCache
                 return;
             }
             Rnd = new Random();
-            var dns = new DnsCacheServer {ShouldRun = true};
+            var dns = new DnsCacheServer { ShouldRun = true, AntiPoison = true};
 
             var ip = IPAddress.Any;
             var ipWords = args[0].Split(':');
@@ -66,10 +66,15 @@ namespace DnsCache
             var s = (Console.ReadLine()??"").ToLowerInvariant();
             while (s != "exit")
             {
-                s = (Console.ReadLine() ?? "").ToLowerInvariant();
                 var words = s.Split(' ');
                 switch (words[0])
                 {
+                    case "ap":
+                    {
+                        dns.AntiPoison = !dns.AntiPoison;
+                        Console.WriteLine("[!]: AntiPoison set to " + dns.AntiPoison);
+                        break;
+                    }
                     case "?":
                     {
                         if (words.Length != 3)
@@ -96,8 +101,9 @@ namespace DnsCache
                             Console.WriteLine("[!]: Not found! domain subtree is nt yet built");
                             break;
                         }
-                        var results = node.GetAllRecords(false, a0).ToArray();
-                        Console.WriteLine("[i]: " + results.Length + " results found:");
+                        var results = node.GetAllRecords(false, a0).ToList();
+                        results.Sort((a, b) => a.ExpirationTime < b.ExpirationTime ? 1 : (a.ExpirationTime == b.ExpirationTime ? 0 : -1));
+                        Console.WriteLine("[i]: " + results.Count + " results found:");
                         foreach (var r in results)
                         {
                             Console.WriteLine("\t" + r);
@@ -144,6 +150,7 @@ namespace DnsCache
                         break;
                     }
                 }
+                s = (Console.ReadLine() ?? "").ToLowerInvariant();
             }
             dns.ShouldRun = false;
             t.Abort();
