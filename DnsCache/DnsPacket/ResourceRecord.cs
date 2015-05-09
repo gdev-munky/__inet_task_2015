@@ -5,8 +5,35 @@ using System.Text;
 
 namespace DnsCache.DnsPacket
 {
-    public class ResourceRecord : IMySerializable
+    public class ResourceRecord : IMySerializable, IEquatable<ResourceRecord>
     {
+        public bool Equals(ResourceRecord other)
+        {
+            if (ReferenceEquals(null, other)) return false;
+            if (ReferenceEquals(this, other)) return true;
+            return string.Equals(_key, other._key) && Type == other.Type && Class == other.Class && Equals(Data, other.Data);
+        }
+
+        public override bool Equals(object obj)
+        {
+            if (ReferenceEquals(null, obj)) return false;
+            if (ReferenceEquals(this, obj)) return true;
+            if (obj.GetType() != this.GetType()) return false;
+            return Equals((ResourceRecord) obj);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hashCode = (_key != null ? _key.GetHashCode() : 0);
+                hashCode = (hashCode*397) ^ (int) Type;
+                hashCode = (hashCode*397) ^ (int) Class;
+                hashCode = (hashCode*397) ^ (Data != null ? Data.GetHashCode() : 0);
+                return hashCode;
+            }
+        }
+
         private string _key = ".";
         public string Key
         {
@@ -167,6 +194,20 @@ namespace DnsCache.DnsPacket
                     break;
             }
             return Key + "\\[" + Type + "]: " + str;
+        }
+
+        public static bool operator ==(ResourceRecord a, ResourceRecord b)
+        {
+            if ((object) a == null)
+                return (object)b == null;
+            if ((object)b == null)
+                return false;
+            return a.Type == b.Type && a.Key == b.Key && a.Class == b.Class;
+        }
+
+        public static bool operator !=(ResourceRecord a, ResourceRecord b)
+        {
+            return !(a == b);
         }
     }
 }

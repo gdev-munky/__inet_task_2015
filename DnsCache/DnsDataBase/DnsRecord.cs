@@ -6,8 +6,34 @@ using DnsCache.DnsPacket;
 
 namespace DnsCache.DnsDataBase
 {
-    public class DnsRecord
+    public class DnsRecord : IEquatable<DnsRecord>
     {
+        public bool Equals(DnsRecord other)
+        {
+            if (ReferenceEquals(null, other)) return false;
+            if (ReferenceEquals(this, other)) return true;
+            return string.Equals(Key, other.Key) && Type == other.Type && Equals(Data, other.Data);
+        }
+
+        public override bool Equals(object obj)
+        {
+            if (ReferenceEquals(null, obj)) return false;
+            if (ReferenceEquals(this, obj)) return true;
+            if (obj.GetType() != this.GetType()) return false;
+            return Equals((DnsRecord) obj);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hashCode = (Key != null ? Key.GetHashCode() : 0);
+                hashCode = (hashCode*397) ^ (int) Type;
+                hashCode = (hashCode*397) ^ (Data != null ? Data.GetHashCode() : 0);
+                return hashCode;
+            }
+        }
+
         public string Key { get; private set; }
         public DnsQueryType Type { get; set; }
         public byte[] Data { get; set; }
@@ -128,6 +154,22 @@ namespace DnsCache.DnsDataBase
                     break;
             }
             return Key + "\\[" + Type + "]: " + str;
+        }
+
+        public static bool operator ==(DnsRecord a, DnsRecord b)
+        {
+            if ((object)a == null)
+                return (object)b == null;
+            if ((object)b == null)
+                return false;
+            if (!(a.Type == b.Type && a.Key == b.Key && a.Data.Length == b.Data.Length))
+                return false;
+            return !a.Data.Where((t, i) => t != b.Data[i]).Any();
+        }
+
+        public static bool operator !=(DnsRecord a, DnsRecord b)
+        {
+            return !(a == b);
         }
     }
 }

@@ -39,7 +39,7 @@ namespace DnsCache
                 if (cnameRecord != null && cname != key)
                 {
                     resources.Add(cnameRecord);
-                    resources.AddRange(GetLocalData(type, cname));
+                    resources.AddRange(GetLocalData(type, cname).Where(r => !resources.Contains(r)));
                 }
             }
             resources.Sort((a, b) => a.ExpirationTime < b.ExpirationTime ? 1 : (a.ExpirationTime == b.ExpirationTime ? 0 : -1));
