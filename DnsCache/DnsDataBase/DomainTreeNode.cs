@@ -13,16 +13,12 @@ namespace DnsCache.DnsDataBase
             Parent = parent;
             SubDomains = new List<DomainTreeNode>();
             Cache = new List<DnsRecord>();
-            Authority = new List<DnsRecord>();
-            AdditionalInfo = new List<DnsRecord>();
         }
         public string Label { get; set; }
 
         public DomainTreeNode Parent { get; set; }
         public List<DomainTreeNode> SubDomains { get; set; }
         public List<DnsRecord> Cache { get; set; }
-        public List<DnsRecord> Authority { get; set; }
-        public List<DnsRecord> AdditionalInfo { get; set; }
 
         public DomainTreeNode Resolve(string path)
         {
@@ -45,22 +41,14 @@ namespace DnsCache.DnsDataBase
             return str + "." + Parent.AccumulateLabels();
         }
 
-        public IEnumerable<DnsRecord> GetAllRecords(bool recursive = false, params DnsQueryType[] types)
+        public IEnumerable<DnsRecord> GetAllRecordsByType(DnsQueryType type)
         {
-            if (types.Contains(DnsQueryType.ANY))
+            if (type == DnsQueryType.ANY)
                 foreach (var rec in Cache)
                     yield return rec;
             else
-                foreach (var rec in Cache.Where(record => types.Contains(record.Type)))
+                foreach (var rec in Cache.Where(record => record.Type == type))
                     yield return rec;
-            if (types.Contains(DnsQueryType.NS))
-                foreach (var rec in Authority.Where(record => record.Type == DnsQueryType.NS))
-                    yield return rec;
-            
-            if (!recursive) 
-                yield break;
-            foreach (var rec in SubDomains.SelectMany(sub => sub.GetAllRecords(true, types)))
-                yield return rec;
         }
 
         public override string ToString()
@@ -88,17 +76,20 @@ namespace DnsCache.DnsDataBase
             return p;
         }
 
-        public void Tick()
+        public IEnumerable<DnsRecord> Tick()
         {
-            Cache.RemoveAll(record => record.IsOutdated);
-            Authority.RemoveAll(record => record.IsOutdated);
-            AdditionalInfo.RemoveAll(record => record.IsOutdated);
-            foreach (var subdomain in SubDomains)
-                subdomain.Tick();
+            var cacheToRemove = Cache.Where(r => r.IsOutdated).ToArray();
+            foreach (var r in cacheToRemove)
+            {
+                Cache.Remove(r);
+                yield return r;
+            }
+            foreach (var r in SubDomains.SelectMany(subdomain => subdomain.Tick()))
+                yield return r;
+            
         }
 
-        public bool AddNewData(string path, ResourceRecord record,
-            DnsResourceRecordType target = DnsResourceRecordType.Cache)
+        public bool AddNewData(string path, ResourceRecord record)
         {
             while (path.EndsWith("."))
                 path = path.Remove(path.Length - 1);
@@ -108,49 +99,19 @@ namespace DnsCache.DnsDataBase
             {
                 var worked = false;
                 var dnsrecord = new DnsRecord(record);
-                if (target.HasFlag(DnsResourceRecordType.Cache))
+
+                var sameRecord = Cache.FirstOrDefault(r => r.Type == record.Type && Equals(r.Data, record.Data));
+                if (sameRecord != null)
                 {
-                    var sameRecord = Cache.FirstOrDefault(r => r.Type == record.Type && Equals(r.Data, record.Data));
-                    if (sameRecord != null)
-                    {
-                        if (sameRecord.SecondsLeft < record.TTL)
-                            sameRecord.SecondsLeft = record.TTL;
-                    }
-                    else
-                    {
-                        Cache.Add(dnsrecord);
-                        worked = true;
-                    }
+                    if (sameRecord.SecondsLeft < record.TTL)
+                        sameRecord.SecondsLeft = record.TTL;
                 }
-                if (target.HasFlag(DnsResourceRecordType.Authority))
+                else
                 {
-                    var sameRecord = Authority.FirstOrDefault(r => r.Type == record.Type && Equals(r.Data, record.Data));
-                    if (sameRecord != null)
-                    {
-                        if (sameRecord.SecondsLeft < record.TTL)
-                            sameRecord.SecondsLeft = record.TTL;
-                    }
-                    else
-                    {
-                        Authority.Add(dnsrecord);
-                        worked = true;
-                    }
+                    Cache.Add(dnsrecord);
+                    worked = true;
                 }
-                if (target.HasFlag(DnsResourceRecordType.AdditionalInfo))
-                {
-                    var sameRecord =
-                        AdditionalInfo.FirstOrDefault(r => r.Type == record.Type && Equals(r.Data, record.Data));
-                    if (sameRecord != null)
-                    {
-                        if (sameRecord.SecondsLeft < record.TTL)
-                            sameRecord.SecondsLeft = record.TTL;
-                    }
-                    else
-                    {
-                        AdditionalInfo.Add(dnsrecord);
-                        worked = true;
-                    }
-                }
+
                 return worked;
             }
 
@@ -161,7 +122,7 @@ namespace DnsCache.DnsDataBase
                 subDomain = new DomainTreeNode(label, this);
                 SubDomains.Add(subDomain);
             }
-            return subDomain.AddNewData((pos < 0) ? "" :string.Join(".", path.Substring(0, pos)), record, target);
+            return subDomain.AddNewData((pos < 0) ? "" :string.Join(".", path.Substring(0, pos)), record);
         }
 
         internal static bool Equals(byte[] a, byte[] b)
@@ -170,13 +131,5 @@ namespace DnsCache.DnsDataBase
                 return false;
             return !a.Where((t, i) => t != b[i]).Any();
         }
-    }
-
-    [Flags]
-    public enum DnsResourceRecordType
-    {
-        Cache = 1,
-        Authority = 2,
-        AdditionalInfo = 4
     }
 }

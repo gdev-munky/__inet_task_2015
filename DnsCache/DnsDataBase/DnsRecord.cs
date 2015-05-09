@@ -59,6 +59,12 @@ namespace DnsCache.DnsDataBase
             };
         }
 
+        public string GetDataAsDomainName()
+        {
+            var offset = 0;
+            return RequestRecord.ReadDnsStringFromBytes(Data, ref offset);
+        }
+
         public override string ToString()
         {
             var str = "";

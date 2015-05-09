@@ -33,15 +33,10 @@ namespace DnsCache
         }
         public bool TimedOut { get { return DateTime.Now > TimeSent.AddSeconds(3); } }
 
-        public Packet AppendNewData(IEnumerable<ResourceRecord> records, DnsResourceRecordType target = DnsResourceRecordType.Cache)
+        public Packet AppendNewData(IEnumerable<ResourceRecord> records)
         {
             var resourceRecords = records as ResourceRecord[] ?? records.ToArray();
-            if (target.HasFlag(DnsResourceRecordType.Cache))
-                Packet.Answers.AddRange(resourceRecords);
-            if (target.HasFlag(DnsResourceRecordType.Authority))
-                Packet.AuthorityRecords.AddRange(resourceRecords);
-            if (target.HasFlag(DnsResourceRecordType.AdditionalInfo))
-                Packet.AdditionalRecords.AddRange(resourceRecords);
+            Packet.Answers.AddRange(resourceRecords);
             return Packet;
         }
     }
