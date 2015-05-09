@@ -145,7 +145,7 @@ namespace DnsCache
                     {
                         lock (Tasks)
                             foreach (var t in Tasks)
-                                foreach (var q in t.Packet.Queries)
+                                foreach (var q in t.MyRequests)
                                     list.Remove(q);
 
                         if (list.Any())
@@ -157,8 +157,12 @@ namespace DnsCache
                     {
                         if (!task.TimedOut || task.NoFrowarding)
                             return false;
-                        task.Packet.Flags |= DnsPacketFlags.RefusedError;
-                        UdpSocket.SendTo(task.Packet.GetBytes(), task.Client);
+                        var p = new Packet
+                        {
+                            Flags = DnsPacketFlags.RefusedError
+                        };
+                        p.Queries.AddRange(task.ClientRequests);
+                        UdpSocket.SendTo(p.GetBytes(), task.Client);
                         return true;
                         
                     });
@@ -174,10 +178,14 @@ namespace DnsCache
                 task = Tasks.FirstOrDefault(t => t.ParentId == p.Id);
                 if (task == null)
                 {
-                    Console.WriteLine(sender +
-                                      ": either dns-poison attempt or just too slow answer");
+                    Console.WriteLine("[{0} #{1:X4}]: either dns-poison attempt or just too slow answer",
+                        sender, p.Id);
                     foreach (var a in p.Answers)
                         Console.WriteLine("\t" + a);
+
+                    Console.WriteLine("Tasks ids:");
+                    foreach (var a in Tasks)
+                        Console.WriteLine("\t#{0:X4}->#{1:X4}", a.ParentId, a.ClientId);
                     
                     if (!AntiPoison)
                     {
@@ -261,17 +269,47 @@ namespace DnsCache
             }
             if (task.NoFrowarding)
                 return;
-            task.AppendNewData(p.Answers);
-            task.AppendNewData(p.AuthorityRecords);
-            task.AppendNewData(p.AdditionalRecords);
-            if (task.Packet.Answers.Count < 1)
+            var rp = new Packet
             {
-                task.Packet.Flags |= DnsPacketFlags.NameError;
-                if (!p.Flags.IsSuccessfull())
-                    task.Packet.Flags = p.Flags;
-            }
+                Id = task.ClientId,
+                Flags = DnsPacketFlags.Response | DnsPacketFlags.AnswerIsAuthoritative
+            };
+            rp.Queries.AddRange(task.ClientRequests);
+            if (!p.Flags.IsSuccessfull())
+                rp.Flags = p.Flags;
+            else
+                foreach (var q in task.ClientRequests)
+                {
+                    var addedSomething = false;
+                    var allData = GetLocalResourceData(q.Type, q.Key);
+                    if (allData.Length > 0)
+                        addedSomething = true;
+                    var toAdd = allData.Where(a => !rp.Answers.Contains(a)).ToArray();
+                    rp.Answers.AddRange(toAdd);
+                    if (q.Type != DnsQueryType.ANY && q.Type != DnsQueryType.NS)
+                    {
+                        var authInfo =
+                            GetLocalResourceData(DnsQueryType.NS, q.Key)
+                                .Where(a => !rp.AuthorityRecords.Contains(a))
+                                .ToArray();
+                        if (authInfo.Length > 0)
+                            addedSomething = true;
+                        rp.AuthorityRecords.AddRange(authInfo);
+                        var otherInfo = authInfo.SelectMany(record =>
+                            GetLocalResourceData(DnsQueryType.ANY, record.Key))
+                            .Where(a => !rp.AdditionalRecords.Contains(a) && !rp.Answers.Contains(a))
+                            .ToArray();
+                        if (otherInfo.Length > 0)
+                            addedSomething = true;
+                        rp.AdditionalRecords.AddRange(otherInfo);
+                    }
+                    if (!addedSomething)
+                    {
+                        rp.Flags |= DnsPacketFlags.NameError;
+                    }
+                }
             Console.WriteLine("[ ]: Answering client [{0} #{1:X4}] (was delayed)", task.Client, task.ClientId);
-            UdpSocket.SendTo(task.Packet.GetBytes(), task.Client);
+            UdpSocket.SendTo(rp.GetBytes(), task.Client);
         }
 
         internal void HandleQuery(IPEndPoint sender, Packet p)
@@ -298,9 +336,9 @@ namespace DnsCache
                 UdpSocket.SendTo(rp.GetBytes(), sender);
                 return;
             }
-            ResourceRecord[] knownAnswers = null;
-            ResourceRecord[] knownAuth = null;
-            ResourceRecord[] knownInfo = null;
+           var knownAnswers = new List<ResourceRecord>();
+           var knownAuth = new List<ResourceRecord>();
+           var knownInfo = new List<ResourceRecord>();
             foreach (var q in p.Queries)
             {
                 if (q.Class != DnsQueryClass.IN)
@@ -312,17 +350,22 @@ namespace DnsCache
                 }
                 Console.WriteLine("[?]: Request [{0} #{1:X4}]: {2}", sender, p.Id, q);
 
-                knownAnswers = GetLocalResourceData(q.Type, q.Key);
-                if (knownAnswers.Length < 1)
+                var data = GetLocalResourceData(q.Type, q.Key);
+                knownAnswers.AddRange(data);
+                if (data.Length < 1)
                 {
                     unknown.Add(q);
                     continue;
                 }
                 if (q.Type != DnsQueryType.ANY && q.Type != DnsQueryType.NS)
                 {
-                    knownAuth = GetLocalResourceData(DnsQueryType.NS, q.Key);
-                    knownInfo = knownAuth.SelectMany(record => 
-                        GetLocalResourceData(DnsQueryType.ANY, record.Key)).ToArray();
+                    var authData = GetLocalResourceData(DnsQueryType.NS, q.Key);
+                    knownAuth.AddRange(authData);
+                    var additionalData = authData.SelectMany(record =>
+                        GetLocalResourceData(DnsQueryType.ANY, record.Key))
+                        .Where(a => !knownAnswers.Contains(a) && !knownAuth.Contains(a) && !knownInfo.Contains(a))
+                        .ToArray();
+                    knownInfo.AddRange(additionalData);
                 }
             }
             if (unknown.Count < 1)
@@ -333,10 +376,10 @@ namespace DnsCache
             } 
             lock (Tasks)
                 foreach (var t in Tasks)
-                    if (!t.Packet.Queries.Except(unknown).Any())
+                    if (!t.MyRequests.Except(unknown).Any())
                         return;
             
-            SendDnsRequestTo(ParentServer, p.Id, sender, unknown, knownAuth, knownInfo);
+            SendDnsRequestTo(ParentServer, p, sender, unknown, knownAuth, knownInfo);
         }
 
         /// <summary>
@@ -350,7 +393,7 @@ namespace DnsCache
             p.Flags |= DnsPacketFlags.RecursionIsDesired;
             lock (Tasks)
             {
-                Tasks.Add(new PrecacheTask(p.Id, p));
+                Tasks.Add(new PrecacheTask(p.Id, requests));
             }
             UdpSocket.SendTo(p.GetBytes(), target);
         }
@@ -361,21 +404,18 @@ namespace DnsCache
         /// <param name="clientId"></param>
         /// <param name="client"></param>
         /// <param name="requests"></param>
-        internal void SendDnsRequestTo(EndPoint target, ushort clientId, IPEndPoint client, 
+        internal void SendDnsRequestTo(EndPoint target, Packet clientPacket, IPEndPoint client, 
             IEnumerable<RequestRecord> requests, 
             IEnumerable<ResourceRecord> knownAuthority = null,
             IEnumerable<ResourceRecord> knownInfo = null)
         {
-            var pr = DomainTreeNode.FormRequest(false, requests.ToArray());
-            var pa = new Packet {Flags = DnsPacketFlags.Response | DnsPacketFlags.AnswerIsAuthoritative};
+            var requestsArray = requests.ToArray();
+            var pr = DomainTreeNode.FormRequest(false, requestsArray);
+            
             pr.Flags |= DnsPacketFlags.RecursionIsDesired;
-            if (knownAuthority != null)
-                pa.AuthorityRecords = knownAuthority.ToList();
-            if (knownInfo != null)
-                pa.AdditionalRecords = knownInfo.ToList();
             lock (Tasks)
             {
-                Tasks.Add(new PrecacheTask(clientId, pr.Id, pa)
+                Tasks.Add(new PrecacheTask(clientPacket.Id, pr.Id, clientPacket.Queries.ToArray(), requestsArray)
                 {
                     Client = client
                 });

