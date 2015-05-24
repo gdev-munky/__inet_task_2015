@@ -52,7 +52,7 @@ namespace SmtpMime
             if (!client.ActLogin())
             {
                 WriteColoredLine(ConsoleColor.Red, "Failed to auth");
-                if (Ask("Try agian? (Enter YES to try again, anything else to exit):").ToUpperInvariant() == "YES")
+                if (Ask("Try agian? (Enter YES to try again, anything else to exit):") == "YES")
                     goto LOGIN;
                 return;
             }

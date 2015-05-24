@@ -12,6 +12,7 @@ namespace SmtpMime
     public delegate bool AskDelegate(string q, out string a);
     public class SmtpClient
     {
+        public bool SupportsAuth { get; private set; }
         public bool BinaryMime { get; private set; }
         public string RecepientEmail { get; set; }
         public string SenderEmail { get; set; }
@@ -29,8 +30,9 @@ namespace SmtpMime
         }
         public bool Connect(string hostname, bool secure = false)
         {
-            Helloed = false;
-            Connected = false;
+            SupportsAuth =
+            Helloed = 
+            Connected = 
             SupportsSsl = false;
             _server = null;
             _stream = null;
@@ -95,7 +97,6 @@ namespace SmtpMime
             var handler = ClientMessage;
             if (handler != null) handler(obj);
         }
-
         protected bool Ask(string q, out string a)
         {
             a = null;
@@ -114,12 +115,17 @@ namespace SmtpMime
                 return false;
             BinaryMime = a.GetMessages().Any(s => s.Contains("BINARYMIME"));
             SupportsSsl = a.GetMessages().Any(s => s.Contains("STARTTLS"));
+            SupportsAuth = a.GetMessages().Any(s => s.Contains("AUTH") && s.Contains("LOGIN"));
             Helloed = true;
             return true;
         }
         public bool ActLogin()
         {
-            if (!Helloed) ActHello();
+            if (!Helloed)
+                if (!ActHello())
+                    return false;
+            if (!SupportsAuth)
+                return true;
             var a = Request("AUTH LOGIN");
             var q = a.GetMessages().FirstOrDefault();
             if (a.GetCodes().Any(c => c != 334) || q == null)
@@ -142,8 +148,10 @@ namespace SmtpMime
         }
         public bool ActFormMessage(IEnumerable<FileInfo> filesToSend)
         {
-            //var files = filesToSend.ToArray();
-            if (!Helloed) ActHello();
+            if (!Helloed)
+                if (!ActHello())
+                    return false;
+
             var a = Request("MAIL FROM:", "<" + SenderEmail + ">");
             if (a.GetCodes().Any(c => c < 200 || c > 300))
                 return false;
