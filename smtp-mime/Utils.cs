@@ -13,7 +13,10 @@ namespace SmtpMime
         /// <summary>
         /// Template for a file item in multipart/form-data format.
         /// </summary>
-        public const string HeaderTemplate = "--{0}\r\nContent-Disposition: attachment; filename=\"{1}\"\r\nContent-Type: {2}; name=\"{0}\"\r\nContent-Transfer-Encoding: binary\r\n\r\n";
+        public const string HeaderTemplate = 
+            "--{0}\r\nContent-Disposition: attachment; filename=\"{1}\"\r\nContent-Type: {2}; name=\"{0}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+        public const string HeaderTemplateBin = 
+            "--{0}\r\nContent-Disposition: attachment; filename=\"{1}\"\r\nContent-Type: {2}; name=\"{0}\"\r\nContent-Transfer-Encoding: binary\r\n\r\n";
 
         /// <summary>
         /// Writes a file to a stream in multipart/form-data format.
@@ -33,7 +36,7 @@ namespace SmtpMime
         /// <exception cref="System.IO.FileNotFoundException">
         /// Thrown if <paramref name="file" /> does not exist.
         /// </exception>
-        public static void WriteMultipartFormData(this FileInfo file, Stream stream, string mimeBoundary, string mimeType)
+        public static void WriteMultipartFormData_Base64(this FileInfo file, EitherSecureStream stream, string mimeBoundary, string mimeType)
         {
             if (file == null)
                 throw new ArgumentNullException("file");
@@ -52,17 +55,44 @@ namespace SmtpMime
             
             var header = string.Format(HeaderTemplate, mimeBoundary, file.Name, mimeType);
             var headerbytes = Encoding.UTF8.GetBytes(header);
-            stream.Write(headerbytes, 0, headerbytes.Length);
+            stream.Send(headerbytes);
+            var fileBytes = Encoding.ASCII.GetBytes(Convert.ToBase64String(File.ReadAllBytes(file.FullName)));
+            stream.Send(fileBytes);
+            var newlineBytes = Encoding.UTF8.GetBytes("\r\n");
+            stream.Send(newlineBytes);
+        }
+        public static void WriteMultipartFormData_Bin(this FileInfo file, EitherSecureStream stream, string mimeBoundary, string mimeType)
+        {
+            if (file == null)
+                throw new ArgumentNullException("file");
+            if (!file.Exists)
+                throw new FileNotFoundException("Unable to find file to write to stream.", file.FullName);
+            if (stream == null)
+                throw new ArgumentNullException("stream");
+            if (mimeBoundary == null)
+                throw new ArgumentNullException("mimeBoundary");
+            if (mimeBoundary.Length == 0)
+                throw new ArgumentException("MIME boundary may not be empty.", "mimeBoundary");
+            if (mimeType == null)
+                throw new ArgumentNullException("mimeType");
+            if (mimeType.Length == 0)
+                throw new ArgumentException("MIME type may not be empty.", "mimeType");
+
+            var header = string.Format(HeaderTemplateBin, mimeBoundary, file.Name, mimeType);
+            var headerbytes = Encoding.UTF8.GetBytes(header);
+            stream.Send(headerbytes);
             using (var fileStream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read))
             {
                 var buffer = new byte[1024];
                 var bytesRead = 0;
                 while ((bytesRead = fileStream.Read(buffer, 0, buffer.Length)) != 0)
-                    stream.Write(buffer, 0, bytesRead);
+                {
+                    stream.Send(buffer);
+                }
                 fileStream.Close();
             }
             var newlineBytes = Encoding.UTF8.GetBytes("\r\n");
-            stream.Write(newlineBytes, 0, newlineBytes.Length);
+            stream.Send(newlineBytes);
         }
     }
 }

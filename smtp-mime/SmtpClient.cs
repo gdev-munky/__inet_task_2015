@@ -12,28 +12,33 @@ namespace SmtpMime
     public delegate bool AskDelegate(string q, out string a);
     public class SmtpClient
     {
+        public bool BinaryMime { get; private set; }
         public string RecepientEmail { get; set; }
         public string SenderEmail { get; set; }
-
         private TcpClient _server;
-        private SslStream _stream;
+        private EitherSecureStream _stream;
         public event Action<string> ServerMessage;
         public event Action<string> ClientMessage;
         public AskDelegate AskFunc;
         public bool Connected { get; private set; }
         public bool Helloed { get; private set; }
+        public bool SupportsSsl { get; private set; }
         public SmtpClient()
         {
             CurrentEncoding = Encoding.UTF8;
         }
-        public bool Connect(string hostname, int port =25)
+        public bool Connect(string hostname, bool secure = false)
         {
+            Helloed = false;
             Connected = false;
+            SupportsSsl = false;
+            _server = null;
+            _stream = null;
             try
             {
-                _server = new TcpClient(hostname, port);
-                _stream = new SslStream(_server.GetStream());
-                _stream.AuthenticateAsClient(hostname);
+                _server = new TcpClient(hostname, secure ? 465 : 25);
+                _stream = secure ? new SecureStream(_server, hostname) : (EitherSecureStream)new UnsecureStream(_server);
+                
                 Connected = true;
             }
             catch (Exception) { }
@@ -57,7 +62,7 @@ namespace SmtpMime
         {
             var str = s.Format(args)+"\r\n";
             var bts = CurrentEncoding.GetBytes(str);
-            _stream.Write(bts, 0, bts.Length);
+            _stream.Send(bts);
             OnClientMessage(s);
         }
         public SmtpAnswer Request(string command, params string[] args)
@@ -107,6 +112,8 @@ namespace SmtpMime
             var a = Request("EHLO kek.ru");
             if (a.GetCodes().Any(c => c < 200 || c > 300))
                 return false;
+            BinaryMime = a.GetMessages().Any(s => s.Contains("BINARYMIME"));
+            SupportsSsl = a.GetMessages().Any(s => s.Contains("STARTTLS"));
             Helloed = true;
             return true;
         }
@@ -158,9 +165,12 @@ namespace SmtpMime
             OnClientMessage("... file data begin ...");
             foreach (var file in filesToSend)
             {
-                file.WriteMultipartFormData(_stream, boundary, MimeMapping.GetMimeMapping(file.Name));
+                if (BinaryMime)
+                    file.WriteMultipartFormData_Bin(_stream, boundary, MimeMapping.GetMimeMapping(file.Name));
+                else
+                    file.WriteMultipartFormData_Base64(_stream, boundary, MimeMapping.GetMimeMapping(file.Name));
             }
-            _stream.Write(MimeType.GenerateEndBoundary(boundary));
+            _stream.Send(MimeType.GenerateEndBoundary(boundary));
             OnClientMessage("... file data end ...");
 
             Write("Sample Text");
@@ -175,7 +185,7 @@ namespace SmtpMime
     internal static class Ext
     {
         public static int BufferSize = 4096;
-        public static byte[] ReadAll(this SslStream stream)
+        public static byte[] ReadAll(this EitherSecureStream stream)
         {
             var buffer = new byte[BufferSize];
             while (true)

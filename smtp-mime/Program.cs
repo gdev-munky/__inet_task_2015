@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices.ComTypes;
 using System.Web;
 
 namespace SmtpMime
@@ -12,6 +13,7 @@ namespace SmtpMime
         {
             if (args.Length > 0 && Directory.Exists(args[0]))
                 Environment.CurrentDirectory = Path.GetFullPath(args[0]);
+            var secure = args.Contains("/secure") || args.Contains("/ssl") || args.Contains("/tls");
 
             var strSmtpServer = Ask("Input SMTP server address:");
             if (strSmtpServer == null)
@@ -28,11 +30,24 @@ namespace SmtpMime
                 return;
             client.ClientMessage += EchoFuncClient;
             client.ServerMessage += EchoFuncServer;
-            if (!client.Connect(strSmtpServer, 465))
+            CONNECT:
+            if (!client.Connect(strSmtpServer, secure))
             {
                 Ask("Failed to connect.");
                 return;
             }
+            if (!client.ActHello())
+            {
+                Ask("Non ESMTP, not supported :(");
+                return;
+            }
+            if (!secure && client.SupportsSsl)
+            {
+                WriteColoredLine(ConsoleColor.Cyan, "Server supports SSL, reconnecting ...");
+                secure = true;
+                goto CONNECT;
+            }
+
             LOGIN:
             if (!client.ActLogin())
             {
