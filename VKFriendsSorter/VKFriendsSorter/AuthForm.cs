@@ -50,6 +50,7 @@ namespace VKFriendsSorter
                                                                "&display=page" +
                                                                "&response_type=token");
         }
+
         private void logout()
         {
             webBrowser1.Navigate(

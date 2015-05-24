@@ -12,6 +12,7 @@ namespace VKFriendsSorter
 {
     public partial class MainForm : Form
     {
+        private Random rand = new Random();
         public string AccessToken { get; private set; }
         public string UserId { get; private set; }
         public VkUser[] Friends { get; private set; }
@@ -71,7 +72,7 @@ namespace VKFriendsSorter
 
         private IEnumerable<VkUser> GetFriends()
         {
-            var doc = SendApiRequestXml(true, "friends.get", "fields=nickname", "order=hints").DocumentElement;
+            var doc = Request(true, "friends.get", "fields=nickname", "order=hints");
             if (doc == null) yield break;
             var friends = doc.ChildNodes.Cast<XmlElement>();
             foreach (var fn in friends)
@@ -98,7 +99,7 @@ namespace VKFriendsSorter
         private IEnumerable<VkPost> GetWallPosts()
         {
             var offset = 0;
-            var doc = SendApiRequestXml(true, "wall.get", "offset=" + offset, "count=" + 100, "filter=owner").DocumentElement;
+            var doc = Request(true, "wall.get", "offset=" + offset, "count=" + 100, "filter=owner");
             if (doc == null) yield break;
             var posts = doc.ChildNodes.Cast<XmlElement>();
             var totalCount = 0;
@@ -146,7 +147,7 @@ namespace VKFriendsSorter
         }
         private IEnumerable<VkPost> GetWallPosts(int offset, int count = 100)
         {
-            var doc = SendApiRequestXml(true, "wall.get", "offset=" + offset, "count=" + count, "filter=owner").DocumentElement;
+            var doc = Request(true, "wall.get", "offset=" + offset, "count=" + count, "filter=owner");
             if (doc == null) yield break;
             var posts = doc.ChildNodes.Cast<XmlElement>();
             foreach (var post in posts)
@@ -188,12 +189,13 @@ namespace VKFriendsSorter
         private void CalculateFriendsLikesForPost(VkPost post)
         {
             var offset = 0;
-            var doc = SendApiRequestXml(true, "likes.getList", 
-                "offset=0",
-                "count=" + MAX_LIKES_PER_PACKET,
-                "item_id=" + post.ID, 
-                "type=post").DocumentElement;
+            var doc = Request(true, "likes.getList",
+                    "offset=0",
+                    "count=" + MAX_LIKES_PER_PACKET,
+                    "item_id=" + post.ID,
+                    "type=post");
             if (doc == null) return;
+            
             var likes = doc.ChildNodes.Cast<XmlElement>();
             var totalCount = 0;
             foreach (var o in likes)
@@ -216,11 +218,11 @@ namespace VKFriendsSorter
         }
         private void CalculateFriendsLikesForPost(VkPost post, ref int offset, int count = MAX_LIKES_PER_PACKET)
         {
-            var doc = SendApiRequestXml(true, "likes.getList", 
-                "offset=" + offset, 
-                "count=" + count, 
-                "item_id=" + post.ID, 
-                "type=post").DocumentElement;
+            var doc = Request(true, "likes.getList",
+                    "offset=" + offset,
+                    "count=" + count,
+                    "item_id=" + post.ID,
+                    "type=post");
             if (doc == null) return;
             var likesList = doc.ChildNodes.Cast<XmlElement>().FirstOrDefault(e => e.Name == "users");
             if (likesList == null) return;
@@ -241,12 +243,12 @@ namespace VKFriendsSorter
         private void CalculateFriendsCommentsForPost(VkPost post)
         {
             var offset = 0;
-            var doc = SendApiRequestXml(false, "wall.getComments",
-                "owner_id" + UserId,
-                "offset=0",
-                "count=" + MAX_COMMENTS_PER_PACKET,
-                "preview_length=1",
-                "post_id=" + post.ID).DocumentElement;
+            var doc = Request(false, "wall.getComments",
+                    "owner_id=" + UserId,
+                    "post_id=" + post.ID,
+                    "offset=0",
+                    "count=" + MAX_COMMENTS_PER_PACKET,
+                    "preview_length=1");
             if (doc == null) return;
             var likes = doc.ChildNodes.Cast<XmlElement>();
             var totalCount = 0;
@@ -273,12 +275,12 @@ namespace VKFriendsSorter
         }
         private void CalculateFriendsCommentsForPost(VkPost post, ref int offset, int count = MAX_COMMENTS_PER_PACKET)
         {
-            var doc = SendApiRequestXml(false, "wall.getComments",
-                "owner_id" + UserId,
-                "offset=" + offset,
-                "count=" + count,
-                "preview_length=1",
-                "post_id=" + post.ID).DocumentElement;
+            var doc = Request(false, "wall.getComments",
+                    "owner_id=" + UserId,
+                    "post_id=" + post.ID,
+                    "offset=" + offset,
+                    "count=" + count,
+                    "preview_length=1");
             if (doc == null) return;
             var likes = doc.ChildNodes.Cast<XmlElement>();
             foreach (var author in likes.Where(like => like.Name == "comment"))
@@ -323,6 +325,41 @@ namespace VKFriendsSorter
             xml.LoadXml(s);
             return xml;
         }
+
+        private XmlElement Request(bool sendToken, string method, params string[] args)
+        {
+            var errorCount = 0;
+            while (true)
+            {
+                var xml = SendApiRequestXml(sendToken, method, args);
+                if (xml == null)
+                    return null;
+                var doc = xml.DocumentElement;
+                if (doc == null)
+                    return null;
+                var err = doc.Name == "error";
+                if (err)
+                {
+                    errorCount++;
+                    if (errorCount >= 10)
+                    {
+                        log(method + ": final error, returning null");
+                        return null;
+                    }
+                    log(method + ": error #" + errorCount + ": " + doc.InnerXml);
+                    try
+                    {
+                        Thread.Sleep(666 + rand.Next(0, 666));
+                    }
+                    catch (ThreadInterruptedException)
+                    {}
+                    continue;
+                }
+                log(method + ": success, <" + doc.Name + " list=" + doc.GetAttribute("list") + ">");
+                return doc;
+            }
+            
+        }
         private void workerGetPostList_DoWork(object sender, System.ComponentModel.DoWorkEventArgs e)
         {
             workerGetPostList.ReportProgress(0);
@@ -340,7 +377,7 @@ namespace VKFriendsSorter
         {
             var thr = new Thread(() =>
             {
-                cexec.AddWorkers(512);
+                cexec.AddWorkers(1);
                 foreach (var vkpost in Posts)
                 {
                     if (vkpost.LikesCount > 0)
@@ -432,7 +469,7 @@ namespace VKFriendsSorter
             button1.Enabled = false;
             var thr = new Thread(() =>
             {
-                button1.Invoke(new Action(() => { Friends = GetFriends().ToArray(); }));
+                Friends = GetFriends().ToArray();
                 Invoke(new Action(() =>
                 {
                     FillList();
@@ -471,6 +508,16 @@ namespace VKFriendsSorter
             authForm = new AuthForm();
             if (authForm.ShowDialog() != DialogResult.OK)
                 Close();
+        }
+        private void log(string s)
+        {
+            var f = new Action(() => { 
+                listBox2.Items.Add(s);
+                listBox2.SelectedIndex = listBox2.Items.Count - 1;
+            });
+            if (listBox2.InvokeRequired)
+                listBox2.Invoke(f);
+            else f();
         }
     }
 }
